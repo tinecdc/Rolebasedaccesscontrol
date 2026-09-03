@@ -1,11 +1,30 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode, useMemo } from "react";
 
-export type Role = "admin" | "manager" | "viewer";
-export type SystemId = "system-a" | "system-b" | "system-c" | "system-d" | "system-e";
+// Allow arbitrary role strings (custom roles supported)
+export type Role = string;
+export type SystemId = string;
+
+const DEFAULT_SYSTEM_CATALOG: SystemCatalogItem[] = [
+  { id: "system-a", label: "Asset Management System", description: "Asset lifecycle tracking and maintenance", color: "#2563eb", accentBg: "#dbeafe", tag: "Assets", url: "https://ndc-ams.transcend-enterprise.com/login" },
+  { id: "system-b", label: "Project Management System", description: "Project planning, milestones, and delivery tracking", color: "#7c3aed", accentBg: "#ede9fe", tag: "Projects", url: "https://ndc-pms.transcend-enterprise.com/" },
+  { id: "system-c", label: "Human Resource Information System", description: "HR, attendance, and workforce records", color: "#0891b2", accentBg: "#cffafe", tag: "Human Resources", url: "https://hris.ndc.gov.ph/" },
+  { id: "system-d", label: "Financial Management System", description: "Budgeting, procurement, and financial operations", color: "#059669", accentBg: "#d1fae5", tag: "Finance", url: "https://fms.ndc.gov.ph/NDC_FMS" },
+  { id: "system-e", label: "Compliance Monitoring System", description: "Compliance tracking, monitoring, and reporting", color: "#d97706", accentBg: "#fef3c7", tag: "Compliance", url: "http://localhost:5177/" },
+];
 
 export interface SystemAccess {
   systemId: SystemId;
   role: Role;
+}
+
+export interface SystemCatalogItem {
+  id: SystemId;
+  label: string;
+  description: string;
+  color: string;
+  accentBg: string;
+  tag: string;
+  url?: string;
 }
 
 export interface User {
@@ -18,101 +37,68 @@ export interface User {
   systems: SystemAccess[];
 }
 
-export const SYSTEMS: Record<SystemId, { label: string; description: string; color: string; accentBg: string; tag: string }> = {
-  "system-a": { label: "System A", description: "Core operations & workflow management", color: "#2563eb", accentBg: "#dbeafe", tag: "Operations" },
-  "system-b": { label: "System B", description: "Financial reporting & budget tracking", color: "#7c3aed", accentBg: "#ede9fe", tag: "Finance" },
-  "system-c": { label: "System C", description: "Customer relationship management", color: "#0891b2", accentBg: "#cffafe", tag: "CRM" },
-  "system-d": { label: "System D", description: "Inventory & supply chain control", color: "#059669", accentBg: "#d1fae5", tag: "Inventory" },
-  "system-e": { label: "System E", description: "IT infrastructure & support desk", color: "#d97706", accentBg: "#fef3c7", tag: "IT" },
-};
+export const SYSTEMS: Record<SystemId, { label: string; description: string; color: string; accentBg: string; tag: string }> = {};
 
-const MOCK_USERS: Record<string, { password: string; user: User }> = {
-  "admin@company.com": {
-    password: "admin123",
-    user: {
-      id: "u1",
-      name: "Alexandra Chen",
-      email: "admin@company.com",
-      avatar: "AC",
-      department: "IT Administration",
-      isSuperAdmin: true,
-      systems: [
-        { systemId: "system-a", role: "admin" },
-        { systemId: "system-b", role: "admin" },
-        { systemId: "system-c", role: "admin" },
-        { systemId: "system-d", role: "admin" },
-        { systemId: "system-e", role: "admin" },
-      ],
-    },
-  },
-  "manager@company.com": {
-    password: "manager123",
-    user: {
-      id: "u2",
-      name: "Marcus Rivera",
-      email: "manager@company.com",
-      avatar: "MR",
-      department: "Product",
-      isSuperAdmin: false,
-      systems: [
-        { systemId: "system-a", role: "manager" },
-        { systemId: "system-b", role: "viewer" },
-        { systemId: "system-c", role: "manager" },
-      ],
-    },
-  },
-  "user@company.com": {
-    password: "user123",
-    user: {
-      id: "u3",
-      name: "Priya Nair",
-      email: "user@company.com",
-      avatar: "PN",
-      department: "Design",
-      isSuperAdmin: false,
-      systems: [
-        { systemId: "system-a", role: "viewer" },
-        { systemId: "system-d", role: "viewer" },
-      ],
-    },
-  },
-  "ops@company.com": {
-    password: "ops123",
-    user: {
-      id: "u4",
-      name: "Jordan Lee",
-      email: "ops@company.com",
-      avatar: "JL",
-      department: "Operations",
-      isSuperAdmin: false,
-      systems: [
-        { systemId: "system-a", role: "manager" },
-        { systemId: "system-d", role: "manager" },
-        { systemId: "system-e", role: "viewer" },
-      ],
-    },
-  },
-};
+function syncSystemCatalog(catalog: SystemCatalogItem[]) {
+  Object.keys(SYSTEMS).forEach((key) => delete SYSTEMS[key]);
+  catalog.forEach((item) => {
+    SYSTEMS[item.id] = {
+      label: item.label,
+      description: item.description,
+      color: item.color,
+      accentBg: item.accentBg,
+      tag: item.tag,
+    };
+  });
+}
 
 interface AuthContextType {
   currentUser: User | null;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   getSystemAccess: (systemId: SystemId) => SystemAccess | null;
+  systemCatalog: SystemCatalogItem[];
+  refreshSystemCatalog: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [systemCatalog, setSystemCatalog] = useState<SystemCatalogItem[]>(DEFAULT_SYSTEM_CATALOG);
+
+  const refreshSystemCatalog = async () => {
+    try {
+      const res = await fetch("/api/admin/systems");
+      const data = (await res.json()) as { success?: boolean; systems?: SystemCatalogItem[] };
+      if (res.ok && data.success && Array.isArray(data.systems)) {
+        setSystemCatalog(data.systems);
+        syncSystemCatalog(data.systems);
+      }
+    } catch {
+      // keep existing catalog if the server is unavailable
+    }
+  };
 
   const login = async (email: string, password: string) => {
-    await new Promise((r) => setTimeout(r, 600));
-    const record = MOCK_USERS[email.toLowerCase()];
-    if (!record) return { success: false, error: "No account found with that email." };
-    if (record.password !== password) return { success: false, error: "Incorrect password." };
-    setCurrentUser(record.user);
-    return { success: true };
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = (await res.json()) as { success: boolean; error?: string; user?: User };
+
+      if (!res.ok || !data.success || !data.user) {
+        return { success: false, error: data.error ?? "Login failed." };
+      }
+
+      setCurrentUser(data.user);
+      return { success: true };
+    } catch {
+      return { success: false, error: "Could not reach the server. Start the API with: pnpm dev:server" };
+    }
   };
 
   const logout = () => setCurrentUser(null);
@@ -122,8 +108,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return currentUser.systems.find((s) => s.systemId === systemId) ?? null;
   };
 
+  const value = useMemo(() => ({ currentUser, login, logout, getSystemAccess, systemCatalog, refreshSystemCatalog }), [currentUser, systemCatalog]);
+
+  useMemo(() => {
+    syncSystemCatalog(systemCatalog);
+  }, [systemCatalog]);
+
   return (
-    <AuthContext.Provider value={{ currentUser, login, logout, getSystemAccess }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { useAuth } from "./auth-context";
+import { useEffect, useState } from "react";
+import { SystemCatalogItem, useAuth } from "./auth-context";
 import { Eye, EyeOff, Shield, Lock, Mail } from "lucide-react";
+import ndcLogo from "../../../assets/NDC_LOGO.png";
 
 const DEMO_ACCOUNTS = [
   { label: "Super Admin", email: "admin@company.com", password: "admin123", note: "All 5 systems", color: "#ef4444", bg: "#fee2e2" },
@@ -10,12 +11,20 @@ const DEMO_ACCOUNTS = [
 ];
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, refreshSystemCatalog, systemCatalog } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [mode, setMode] = useState<"signin" | "forgot">("signin");
+  const [notice, setNotice] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  useEffect(() => {
+    void refreshSystemCatalog();
+  }, [refreshSystemCatalog]);
 
   const fillDemo = (d: (typeof DEMO_ACCOUNTS)[0]) => {
     setEmail(d.email);
@@ -32,17 +41,69 @@ export function LoginPage() {
     if (!result.success) setError(result.error ?? "Login failed.");
   };
 
+  const handleForgotPassword = async () => {
+    setLoading(true);
+    setError("");
+    setNotice("");
+
+    try {
+      if (!email || !newPassword) {
+        setError("Provide your email and a new password.");
+        return;
+      }
+
+      if (!resetToken) {
+        const tokenRes = await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        const tokenData = (await tokenRes.json()) as { success?: boolean; message?: string; resetToken?: string; error?: string };
+
+        if (!tokenRes.ok || !tokenData.success || !tokenData.resetToken) {
+          setError(tokenData.error ?? "Unable to request a reset token.");
+          return;
+        }
+
+        setResetToken(tokenData.resetToken);
+        setNotice(tokenData.message ?? "Reset token created. Completing the password update...");
+      }
+
+      const res = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, token: resetToken, password: newPassword }),
+      });
+      const data = (await res.json()) as { success?: boolean; message?: string; error?: string };
+      if (res.ok && data.success) {
+        setNotice(data.message ?? "Password updated successfully.");
+        setMode("signin");
+        setPassword("");
+        setResetToken("");
+        setNewPassword("");
+      } else {
+        setError(data.error ?? "Unable to process your request.");
+      }
+    } catch {
+      setError("Unable to reach the server.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen w-full flex" style={{ fontFamily: "var(--font-family-base)" }}>
+    <div className="min-h-screen w-full flex flex-col lg:flex-row" style={{ fontFamily: "var(--font-family-base)" }}>
       {/* Left panel */}
       <div className="hidden lg:flex flex-col justify-between w-[480px] shrink-0 p-12" style={{ background: "#0f172a" }}>
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <Shield className="w-4 h-4 text-white" />
-          </div>
           <span style={{ color: "#e2e8f0", fontFamily: "var(--font-family-mono)", fontSize: "0.85rem", letterSpacing: "0.05em" }}>
-            NEXUS / PORTAL
+            {/* PORTAL */}
           </span>
+          <img
+            src={ndcLogo}
+            alt="NDC Logo"
+            className="w-full h-full object-contain flex items-center justify-center"
+          />
         </div>
 
         <div>
@@ -54,14 +115,8 @@ export function LoginPage() {
           </p>
 
           <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: "System A", tag: "Operations", color: "#2563eb" },
-              { label: "System B", tag: "Finance", color: "#7c3aed" },
-              { label: "System C", tag: "CRM", color: "#0891b2" },
-              { label: "System D", tag: "Inventory", color: "#059669" },
-              { label: "System E", tag: "IT", color: "#d97706" },
-            ].map((s) => (
-              <div key={s.label} className="p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+            {systemCatalog.map((s: SystemCatalogItem) => (
+              <div key={s.id} className="p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
                 <div className="w-2 h-2 rounded-full mb-2" style={{ background: s.color }} />
                 <p className="text-white" style={{ fontSize: "0.8rem", fontWeight: 500 }}>{s.label}</p>
                 <p className="text-slate-500" style={{ fontSize: "0.72rem" }}>{s.tag}</p>
@@ -76,25 +131,27 @@ export function LoginPage() {
         </div>
 
         <p className="text-slate-600" style={{ fontFamily: "var(--font-family-mono)", fontSize: "0.7rem" }}>
-          © 2026 Nexus Systems — v4.2.1
+          © 2026 National Development Company — v1.0.0
         </p>
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-6 bg-background">
-        <div className="w-full max-w-[400px]">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 bg-background">
+        <div className="w-full max-w-[420px]">
           <div className="lg:hidden flex items-center gap-2 mb-8">
             <div className="w-7 h-7 rounded-md bg-blue-600 flex items-center justify-center">
               <Shield className="w-4 h-4 text-white" />
             </div>
             <span style={{ fontFamily: "var(--font-family-mono)", fontSize: "0.8rem", letterSpacing: "0.05em", color: "#0e1117" }}>
-              NEXUS / PORTAL
+              National Development Company / PORTAL
             </span>
           </div>
 
-          <h2 className="text-foreground mb-1" style={{ fontSize: "1.6rem", fontWeight: 700 }}>Sign in</h2>
+          <h2 className="text-foreground mb-1" style={{ fontSize: "1.6rem", fontWeight: 700 }}>{mode === "signin" ? "Sign in" : "Reset password"}</h2>
           <p className="text-muted-foreground mb-7" style={{ fontSize: "0.9rem" }}>
-            You'll see only the systems you're authorized to access.
+            {mode === "signin"
+              ? "You'll see only the systems you're authorized to access."
+              : "Enter your email to generate a reset token for the demo backend."}
           </p>
 
           {/* Demo accounts */}
@@ -116,7 +173,7 @@ export function LoginPage() {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={mode === "signin" ? handleSubmit : (ev) => { ev.preventDefault(); void handleForgotPassword(); }} className="space-y-4">
             <div>
               <label className="block text-foreground mb-1.5" style={{ fontSize: "0.85rem", fontWeight: 500 }}>Email</label>
               <div className="relative">
@@ -133,32 +190,66 @@ export function LoginPage() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-foreground mb-1.5" style={{ fontSize: "0.85rem", fontWeight: 500 }}>Password</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input
-                  type={showPw ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-border bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
-                  style={{ fontSize: "0.9rem" }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+            {mode === "signin" ? (
+              <div>
+                <label className="block text-foreground mb-1.5" style={{ fontSize: "0.85rem", fontWeight: 500 }}>Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type={showPw ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-border bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                    style={{ fontSize: "0.9rem" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPw(!showPw)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-foreground mb-1.5" style={{ fontSize: "0.85rem", fontWeight: 500 }}>Reset token</label>
+                  <input
+                    value={resetToken}
+                    onChange={(e) => setResetToken(e.target.value)}
+                    required
+                    placeholder="Paste the token from the backend"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                    style={{ fontSize: "0.9rem" }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-foreground mb-1.5" style={{ fontSize: "0.85rem", fontWeight: 500 }}>New password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    placeholder="Choose a new password"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                    style={{ fontSize: "0.9rem" }}
+                  />
+                </div>
+              </>
+            )}
 
             {error && (
               <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-600" style={{ fontSize: "0.85rem" }}>
                 {error}
+              </div>
+            )}
+
+            {notice && (
+              <div className="px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700" style={{ fontSize: "0.85rem" }}>
+                {notice}
               </div>
             )}
 
@@ -168,9 +259,17 @@ export function LoginPage() {
               className="w-full py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition-all"
               style={{ fontSize: "0.9rem", fontWeight: 600 }}
             >
-              {loading ? "Signing in…" : "Sign in"}
+              {loading ? (mode === "signin" ? "Signing in…" : "Sending…") : mode === "signin" ? "Sign in" : "Send reset token"}
             </button>
           </form>
+
+          <button
+            type="button"
+            onClick={() => { setMode(mode === "signin" ? "forgot" : "signin"); setError(""); setNotice(""); }}
+            className="mt-4 text-sm text-blue-600 hover:text-blue-700"
+          >
+            {mode === "signin" ? "Forgot password?" : "Back to sign in"}
+          </button>
         </div>
       </div>
     </div>

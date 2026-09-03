@@ -19,5 +19,5 @@ export function RoleBadge({ role, size = "sm" }: { role: Role; size?: "sm" | "md
       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.dot }} />
       {c.label}
     </span>
-  );
+    );
 }

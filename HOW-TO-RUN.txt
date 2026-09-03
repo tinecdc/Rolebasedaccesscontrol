@@ -1,0 +1,101 @@
+================================================================================
+  ROLE BASED ACCESS CONTROL — HOW TO RUN THE WEBSITE
+================================================================================
+
+PREREQUISITES
+-------------
+- Node.js 18 or newer (includes npm)
+  Download: https://nodejs.org/
+
+
+FIRST-TIME SETUP
+----------------
+1. Open a terminal in this project folder:
+   c:\Users\ndcus\RBA\Rolebasedaccesscontrol
+
+2. Install dependencies:
+
+   npm install
+
+   (Alternatively, if you use pnpm: pnpm install)
+
+
+RUNNING THE WEBSITE (TWO TERMINALS REQUIRED)
+--------------------------------------------
+This app has two parts that must run at the same time:
+  - Backend API  (port 3001) — handles login and database
+  - Frontend     (port 5173) — the website UI
+
+TERMINAL 1 — Start the API server:
+
+   npm run dev:server
+
+  Wait until you see: "RBA API running at http://localhost:3001"
+  If this is the first run, migrations will be applied automatically. To run migrations manually:
+
+  npm --prefix server run db:migrate
+
+TERMINAL 2 — Start the frontend:
+
+   npm run dev
+
+   Wait until you see the local URL (usually http://localhost:5173)
+
+
+OPEN THE WEBSITE
+----------------
+In your browser, go to:
+
+   http://localhost:5173
+
+
+SIGN IN (DEMO ACCOUNTS)
+-----------------------
+Use any of these accounts on the login page:
+
+   Super Admin   admin@company.com     password: admin123
+   Manager       manager@company.com   password: manager123
+   Viewer        user@company.com      password: user123
+   Ops Lead      ops@company.com       password: ops123
+
+Each account has access to different systems based on their role.
+
+
+STOPPING THE APP
+----------------
+Press Ctrl+C in each terminal to stop the servers.
+
+
+BUILD FOR PRODUCTION (OPTIONAL)
+-------------------------------
+Build the frontend:
+
+   npm run build
+
+The built files will be in the "dist" folder.
+
+
+DATABASE
+--------
+- SQLite database file: server/data/rba.db
+- Created automatically on first API server start
+- Pre-filled with demo users and permissions
+
+To reset the database:
+  1. Stop the API server (Terminal 1)
+  2. Delete the file: server/data/rba.db
+  3. Start the API server again — demo data will be re-created
+
+
+TROUBLESHOOTING
+---------------
+"Could not reach the server" on login
+  -> Make sure Terminal 1 is running (npm run dev:server)
+
+Port already in use
+  -> Close other apps using port 3001 or 5173, then try again
+
+npm is not recognized
+  -> Install Node.js from https://nodejs.org/ and restart your terminal
+
+================================================================================

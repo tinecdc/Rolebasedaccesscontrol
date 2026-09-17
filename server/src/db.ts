@@ -113,6 +113,12 @@ export function initSchema() {
 // Allow Role to be any string to support custom roles stored in `custom_roles`
 export type Role = string;
 
+export interface CustomRoleRow {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 export interface UserRow {
   id: string;
   email: string;
@@ -122,6 +128,17 @@ export interface UserRow {
   department: string;
   is_super_admin: number;
   is_approved: number;
+}
+
+export interface SystemRow {
+  id: string;
+  label: string;
+  description: string;
+  color: string;
+  accent_bg: string;
+  tag: string;
+  url: string | null;
+  alt_url: string | null;
 }
 
 export interface SystemSummary {
@@ -215,7 +232,7 @@ export function createSystem(opts: { id: string; label: string; description: str
 }
 
 export function updateSystem(id: string, opts: { label?: string; description?: string; color?: string; accentBg?: string; tag?: string; url?: string | null; altUrl?: string | null }) {
-  const row = db.prepare("SELECT * FROM systems WHERE id = ?").get(id);
+  const row = db.prepare("SELECT * FROM systems WHERE id = ?").get(id) as SystemRow | undefined;
   if (!row) return null;
 
   const updated = {
@@ -485,22 +502,27 @@ export function approveUser(userId: string) {
 }
 
 // Custom role helpers
-export function getAllCustomRoles() {
-  return db.prepare("SELECT id, name, description FROM custom_roles ORDER BY name").all() as Array<{ id: string; name: string; description: string | null }>;
+export function getAllCustomRoles(): CustomRoleRow[] {
+  return db.prepare("SELECT id, name, description FROM custom_roles ORDER BY name").all() as CustomRoleRow[];
 }
 
-export function createCustomRole(opts: { id: string; name: string; description?: string | null }) {
+export function createCustomRole(opts: { id: string; name: string; description?: string | null }): CustomRoleRow {
   db.prepare("INSERT INTO custom_roles (id, name, description) VALUES (@id, @name, @description)").run({ id: opts.id, name: opts.name, description: opts.description ?? null });
-  return db.prepare("SELECT id, name, description FROM custom_roles WHERE id = ?").get(opts.id);
+  const row = db.prepare("SELECT id, name, description FROM custom_roles WHERE id = ?").get(opts.id) as CustomRoleRow | undefined;
+  if (!row) {
+    throw new Error("Failed to create custom role.");
+  }
+  return row;
 }
 
-export function updateCustomRole(id: string, opts: { name?: string; description?: string | null }) {
-  const row = db.prepare("SELECT * FROM custom_roles WHERE id = ?").get(id);
+export function updateCustomRole(id: string, opts: { name?: string; description?: string | null }): CustomRoleRow | null {
+  const row = db.prepare("SELECT * FROM custom_roles WHERE id = ?").get(id) as CustomRoleRow | undefined;
   if (!row) return null;
   const name = opts.name ?? row.name;
   const description = typeof opts.description === "undefined" ? row.description : opts.description;
   db.prepare("UPDATE custom_roles SET name = @name, description = @description WHERE id = @id").run({ id, name, description });
-  return db.prepare("SELECT id, name, description FROM custom_roles WHERE id = ?").get(id);
+  const updated = db.prepare("SELECT id, name, description FROM custom_roles WHERE id = ?").get(id) as CustomRoleRow | undefined;
+  return updated ?? null;
 }
 
 export function deleteCustomRole(id: string) {

@@ -1,4 +1,3 @@
-import { Mail } from "lucide-react";
 import { SystemCatalogItem } from "../auth-context";
 
 export function SettingsTabContent({ systemCatalog }: { systemCatalog: SystemCatalogItem[] }) {
@@ -6,14 +5,14 @@ export function SettingsTabContent({ systemCatalog }: { systemCatalog: SystemCat
     <div className="mt-6 space-y-6">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-slate-950/80 p-4">
-          <p className="text-sm text-slate-400">Mail delivery</p>
-          <p className="mt-2 text-2xl font-semibold text-white">Configured</p>
-          <p className="mt-2 text-sm text-slate-400">SMTP setup reflects the current settings workspace.</p>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/80 p-4">
           <p className="text-sm text-slate-400">Security posture</p>
           <p className="mt-2 text-2xl font-semibold text-white">Healthy</p>
           <p className="mt-2 text-sm text-slate-400">Identity and authentication controls remain active.</p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/80 p-4">
+          <p className="text-sm text-slate-400">Connected systems</p>
+          <p className="mt-2 text-2xl font-semibold text-white">{systemCatalog.length}</p>
+          <p className="mt-2 text-sm text-slate-400">System integrations are currently available and operational.</p>
         </div>
       </div>
 
@@ -23,7 +22,6 @@ export function SettingsTabContent({ systemCatalog }: { systemCatalog: SystemCat
             <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Connected systems</p>
             <h3 className="mt-1 text-lg font-semibold text-white">System integration list</h3>
           </div>
-          <Mail className="h-5 w-5 text-emerald-400" />
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {systemCatalog.map((system) => (

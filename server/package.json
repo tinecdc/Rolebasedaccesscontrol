@@ -11,10 +11,12 @@
     "test": "tsx src/test/roles.test.ts"
   },
   "dependencies": {
+    "@types/pg": "^8.23.1",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.9.1",
     "cors": "^2.8.5",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

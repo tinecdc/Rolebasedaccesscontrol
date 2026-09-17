@@ -35,11 +35,20 @@ export default defineConfig({
   assetsInclude: ['**/*.svg', '**/*.csv'],
 
   server: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: process.env.VITE_API_URL ?? 'http://localhost:3001',
         changeOrigin: true,
+        rewrite: (path) => path,
       },
     },
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
   },
 })

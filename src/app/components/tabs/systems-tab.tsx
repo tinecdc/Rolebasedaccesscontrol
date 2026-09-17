@@ -18,12 +18,14 @@ export function SystemsTabContent({
   creatingSystem: boolean;
 }) {
   const { refreshSystemCatalog } = useAuth();
-  const [editableUrls, setEditableUrls] = useState<Record<string, string>>({});
+  const [editableUrls, setEditableUrls] = useState<Record<string, { url: string; altUrl: string }>>({});
   const [savingUrls, setSavingUrls] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    const next: Record<string, string> = {};
-    systemCatalog.forEach((s) => (next[s.id] = s.url ?? ""));
+    const next: Record<string, { url: string; altUrl: string }> = {};
+    systemCatalog.forEach((s) => {
+      next[s.id] = { url: s.url ?? "", altUrl: s.altUrl ?? "" };
+    });
     setEditableUrls(next);
   }, [systemCatalog]);
   return (
@@ -67,18 +69,42 @@ export function SystemsTabContent({
               <p className="mt-1 text-sm text-slate-400">{system.description}</p>
 
               <div className="mt-3 rounded-xl border border-white/10 bg-slate-900 p-2 text-xs text-slate-300">
-                <p className="mb-1 text-slate-500">URL</p>
+                <p className="mb-1 text-slate-500">Primary URL</p>
                 {currentUser?.isSuperAdmin ? (
-                  <div className="flex items-center gap-2">
-                    <input className="flex-1 rounded-md bg-transparent px-2 py-1 text-xs text-white" value={editableUrls[system.id] ?? ""} onChange={(e) => setEditableUrls((prev) => ({ ...prev, [system.id]: e.target.value }))} />
+                  <div className="space-y-2">
+                    <input
+                      className="w-full rounded-md bg-transparent px-2 py-1 text-xs text-white"
+                      value={editableUrls[system.id]?.url ?? ""}
+                      onChange={(e) => setEditableUrls((prev) => ({
+                        ...prev,
+                        [system.id]: { url: e.target.value, altUrl: prev[system.id]?.altUrl ?? "" },
+                      }))}
+                      placeholder="Primary link"
+                    />
+                    <div className="pt-1">
+                      <p className="mb-1 text-slate-500">Backup URL</p>
+                      <input
+                        className="w-full rounded-md bg-transparent px-2 py-1 text-xs text-white"
+                        value={editableUrls[system.id]?.altUrl ?? ""}
+                        onChange={(e) => setEditableUrls((prev) => ({
+                          ...prev,
+                          [system.id]: { url: prev[system.id]?.url ?? "", altUrl: e.target.value },
+                        }))}
+                        placeholder="Fallback link"
+                      />
+                    </div>
                     <button
                       onClick={async () => {
                         try {
                           setSavingUrls((s) => ({ ...s, [system.id]: true }));
+                          const payload = {
+                            url: editableUrls[system.id]?.url?.trim() ? editableUrls[system.id].url : null,
+                            altUrl: editableUrls[system.id]?.altUrl?.trim() ? editableUrls[system.id].altUrl : null,
+                          };
                           const res = await fetch(`/api/admin/systems/${system.id}`, {
                             method: "PUT",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ url: editableUrls[system.id] ?? null }),
+                            body: JSON.stringify(payload),
                           });
                           if (res.ok) {
                             await refreshSystemCatalog();
@@ -96,18 +122,30 @@ export function SystemsTabContent({
                     </button>
                   </div>
                 ) : (
-                  <p className="truncate">{system.url ?? "No system URL configured"}</p>
+                  <div className="space-y-1">
+                    <p className="truncate">{system.url ?? "No primary URL configured"}</p>
+                    {system.altUrl && <p className="truncate text-slate-400">Backup: {system.altUrl}</p>}
+                  </div>
                 )}
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
                 <button
                   type="button"
-                  onClick={() => system.url && window.open(system.url, "_blank", "noopener,noreferrer")}
-                  disabled={!system.url}
+                  onClick={() => {
+                    const urls = [system.url, system.altUrl].filter(Boolean) as string[];
+                    if (!urls.length) return;
+                    const primary = urls[0];
+                    const fallback = urls[1];
+                    const opened = window.open(primary, "_blank", "noopener,noreferrer");
+                    if (!opened && fallback) {
+                      window.open(fallback, "_blank", "noopener,noreferrer");
+                    }
+                  }}
+                  disabled={!system.url && !system.altUrl}
                   className="rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {system.url ? "Open system" : "No link"}
+                  {system.url || system.altUrl ? "Open system" : "No link"}
                 </button>
               </div>
             </div>

@@ -93,6 +93,20 @@ const SYSTEM_DATA: Record<SystemId, {
       { action: "Patch deployment completed: 48 hosts", time: "4h ago", status: "ok" },
     ],
   },
+  "system-f": {
+    stats: [
+      { label: "Open Incidents", value: "31", sub: "6 critical", color: "#ef4444" },
+      { label: "Resolved Today", value: "18", sub: "+5 vs target", color: "#059669" },
+      { label: "Avg First Response", value: "12min", sub: "86% on time", color: "#2563eb" },
+      { label: "Backlog Age", value: "2.7d", sub: "Improving", color: "#7c3aed" },
+    ],
+    activity: [
+      { action: "Printer queue issue escalated to desktop support", time: "Just now", status: "warn" },
+      { action: "Ticket TICK-4402 closed after VPN fix", time: "18m ago", status: "ok" },
+      { action: "Laptop replacement request approved", time: "49m ago", status: "info" },
+      { action: "Emergency patch deployment scheduled", time: "2h ago", status: "warn" },
+    ],
+  },
 };
 
 const statusIcon = (s: "ok" | "warn" | "info") => {

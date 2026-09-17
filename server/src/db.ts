@@ -38,7 +38,8 @@ export function initSchema() {
       color TEXT NOT NULL,
       accent_bg TEXT NOT NULL,
       tag TEXT NOT NULL,
-      url TEXT
+      url TEXT,
+      alt_url TEXT
     );
 
     CREATE TABLE IF NOT EXISTS user_system_access (
@@ -48,17 +49,6 @@ export function initSchema() {
       PRIMARY KEY (user_id, system_id),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS smtp_settings (
-      id INTEGER PRIMARY KEY CHECK(id = 1),
-      host TEXT,
-      port INTEGER DEFAULT 587,
-      username TEXT,
-      password TEXT,
-      secure INTEGER DEFAULT 0,
-      from_email TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -102,6 +92,13 @@ export function initSchema() {
   const announcementColumns = db.prepare("PRAGMA table_info(announcements)").all() as Array<{ name: string }>;
   const existingColumns = new Set(announcementColumns.map((column) => column.name));
 
+  const systemColumns = db.prepare("PRAGMA table_info(systems)").all() as Array<{ name: string }>;
+  const existingSystemColumns = new Set(systemColumns.map((column) => column.name));
+
+  if (!existingSystemColumns.has("alt_url")) {
+    db.exec("ALTER TABLE systems ADD COLUMN alt_url TEXT;");
+  }
+
   if (!existingColumns.has("attachment_url")) {
     db.exec("ALTER TABLE announcements ADD COLUMN attachment_url TEXT;");
   }
@@ -135,20 +132,12 @@ export interface SystemSummary {
   accentBg: string;
   tag: string;
   url?: string | null;
+  altUrl?: string | null;
 }
 
 export interface SystemAccessRow {
   system_id: string;
   role: Role;
-}
-
-export interface SmtpSettingsRow {
-  host: string | null;
-  port: number | null;
-  username: string | null;
-  password: string | null;
-  secure: number;
-  from_email: string | null;
 }
 
 export interface AuditLogRow {
@@ -165,7 +154,6 @@ export interface DashboardSummary {
   totalSystems: number;
   totalAccessEntries: number;
   auditLogCount: number;
-  smtpConfigured: boolean;
   recentActivity: Array<{ action: string; details: string | null; created_at: string }>;
 }
 
@@ -185,7 +173,7 @@ export function getAllUsers(): UserRow[] {
 
 export function getAllSystems(): SystemSummary[] {
   return db
-    .prepare("SELECT id, label, description, color, accent_bg, tag, url FROM systems ORDER BY label")
+    .prepare("SELECT id, label, description, color, accent_bg, tag, url, alt_url FROM systems ORDER BY label")
     .all()
     .map((row: any) => ({
       id: row.id,
@@ -195,13 +183,14 @@ export function getAllSystems(): SystemSummary[] {
       accentBg: row.accent_bg,
       tag: row.tag,
       url: row.url ?? null,
+      altUrl: row.alt_url ?? null,
     }));
 }
 
-export function createSystem(opts: { id: string; label: string; description: string; color: string; accentBg: string; tag: string; url?: string | null }): SystemSummary {
+export function createSystem(opts: { id: string; label: string; description: string; color: string; accentBg: string; tag: string; url?: string | null; altUrl?: string | null }): SystemSummary {
   db.prepare(`
-    INSERT INTO systems (id, label, description, color, accent_bg, tag, url)
-    VALUES (@id, @label, @description, @color, @accentBg, @tag, @url)
+    INSERT INTO systems (id, label, description, color, accent_bg, tag, url, alt_url)
+    VALUES (@id, @label, @description, @color, @accentBg, @tag, @url, @altUrl)
   `).run({
     id: opts.id,
     label: opts.label,
@@ -210,6 +199,7 @@ export function createSystem(opts: { id: string; label: string; description: str
     accentBg: opts.accentBg,
     tag: opts.tag,
     url: opts.url ?? null,
+    altUrl: opts.altUrl ?? null,
   });
 
   return {
@@ -220,10 +210,11 @@ export function createSystem(opts: { id: string; label: string; description: str
     accentBg: opts.accentBg,
     tag: opts.tag,
     url: opts.url ?? null,
+    altUrl: opts.altUrl ?? null,
   };
 }
 
-export function updateSystem(id: string, opts: { label?: string; description?: string; color?: string; accentBg?: string; tag?: string; url?: string | null }) {
+export function updateSystem(id: string, opts: { label?: string; description?: string; color?: string; accentBg?: string; tag?: string; url?: string | null; altUrl?: string | null }) {
   const row = db.prepare("SELECT * FROM systems WHERE id = ?").get(id);
   if (!row) return null;
 
@@ -234,12 +225,13 @@ export function updateSystem(id: string, opts: { label?: string; description?: s
     accent_bg: opts.accentBg ?? row.accent_bg,
     tag: opts.tag ?? row.tag,
     url: typeof opts.url === "undefined" ? row.url : opts.url,
+    alt_url: typeof opts.altUrl === "undefined" ? row.alt_url : opts.altUrl,
   };
 
   db.prepare(`
-    UPDATE systems SET label = @label, description = @description, color = @color, accent_bg = @accent_bg, tag = @tag, url = @url
+    UPDATE systems SET label = @label, description = @description, color = @color, accent_bg = @accent_bg, tag = @tag, url = @url, alt_url = @alt_url
     WHERE id = @id
-  `).run({ id, label: updated.label, description: updated.description, color: updated.color, accent_bg: updated.accent_bg, tag: updated.tag, url: updated.url });
+  `).run({ id, label: updated.label, description: updated.description, color: updated.color, accent_bg: updated.accent_bg, tag: updated.tag, url: updated.url, alt_url: updated.alt_url });
 
   return getAllSystems().find((s) => s.id === id) ?? null;
 }
@@ -422,7 +414,6 @@ export function getDashboardSummary(): DashboardSummary {
   const totalSystems = db.prepare("SELECT COUNT(*) as count FROM systems").get() as { count: number };
   const totalAccessEntries = db.prepare("SELECT COUNT(*) as count FROM user_system_access").get() as { count: number };
   const auditLogCount = db.prepare("SELECT COUNT(*) as count FROM audit_logs").get() as { count: number };
-  const smtpConfigured = db.prepare("SELECT COUNT(*) as count FROM smtp_settings WHERE host IS NOT NULL AND trim(host) <> ''").get() as { count: number };
   const recentActivity = db.prepare(`
     SELECT action, details, created_at
     FROM audit_logs
@@ -436,41 +427,8 @@ export function getDashboardSummary(): DashboardSummary {
     totalSystems: totalSystems.count,
     totalAccessEntries: totalAccessEntries.count,
     auditLogCount: auditLogCount.count,
-    smtpConfigured: smtpConfigured.count > 0,
     recentActivity,
   };
-}
-
-export function getSmtpSettings(): SmtpSettingsRow | null {
-  return db.prepare(`
-    SELECT host, port, username, password, secure, from_email
-    FROM smtp_settings
-    WHERE id = 1
-  `).get() as SmtpSettingsRow | null;
-}
-
-export function saveSmtpSettings(config: { host: string; port: number; username: string; password: string; secure: boolean; fromEmail: string }) {
-  db.prepare(`
-    INSERT INTO smtp_settings (id, host, port, username, password, secure, from_email, updated_at)
-    VALUES (1, @host, @port, @username, @password, @secure, @from_email, datetime('now'))
-    ON CONFLICT(id) DO UPDATE SET
-      host = excluded.host,
-      port = excluded.port,
-      username = excluded.username,
-      password = excluded.password,
-      secure = excluded.secure,
-      from_email = excluded.from_email,
-      updated_at = excluded.updated_at
-  `).run({
-    host: config.host,
-    port: config.port,
-    username: config.username,
-    password: config.password,
-    secure: config.secure ? 1 : 0,
-    from_email: config.fromEmail,
-  });
-
-  return getSmtpSettings();
 }
 
 export function createPasswordResetToken(email: string, token: string) {

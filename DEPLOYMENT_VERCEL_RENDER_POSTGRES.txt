@@ -1,0 +1,232 @@
+RBA + NDC TS Deployment Guide
+
+Project: Vercel + Render + Postgres migration
+
+Overview
+This project currently has two separate runtime parts:
+1) Frontend app (Vite/React)
+2) Backend API (Express + SQLite)
+
+For external/public hosting, the recommended production architecture is:
+- Frontend: Vercel
+- API: Render
+- Database: PostgreSQL (Neon or Supabase)
+
+Why this architecture
+- Vercel is best for the React frontend.
+- Render is best for the Express API and keeps a persistent service running.
+- SQLite is local file-based and not suitable for a hosted environment with multiple app instances.
+- PostgreSQL is a better production database for persistence, reliability, and hosted deployments.
+
+Current app structure to keep in mind
+- Frontend root: RBA project
+- API root: server/
+- Frontend API base URL is currently configured as localhost:3001 in vite.config.ts
+- DB is currently stored in a local SQLite file under server/data/rba.db
+- The backend also initializes and seeds data on startup from server/src/index.ts and server/src/seed.ts
+
+Deployment plan
+
+Step 1: Prepare the API for Render
+1. Move the backend logic to a production-ready Express service.
+2. Add a proper environment file (.env) for production values.
+3. Replace SQLite access with PostgreSQL access.
+4. Provide a startup command for Render.
+
+Recommended Render service settings:
+- Service type: Web Service
+- Build Command: npm install
+- Start Command: npm run start --workspace @rba/server
+- Environment variables:
+  PORT=3001
+  DATABASE_URL=postgresql://user:pass@host:5432/dbname
+  NODE_ENV=production
+  CORS_ORIGIN=https://your-frontend.vercel.app
+
+Step 2: Prepare the frontend for Vercel
+1. Push the frontend repo (or monorepo root) to GitHub.
+2. In Vercel, import the project.
+3. Set the project root to the frontend directory if the repo contains multiple apps.
+4. Use these build settings:
+   - Framework: Vite
+   - Build Command: npm install && npm run build
+   - Output Directory: dist
+5. Add environment variables:
+   - VITE_API_URL=https://your-render-app.onrender.com
+
+Recommended frontend environment variable:
+- VITE_API_URL = https://your-render-service.onrender.com
+
+Then update the app to use:
+- const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+
+This replaces localhost assumptions for production.
+
+Step 3: Move the database from SQLite to Postgres
+This is the key migration step.
+
+Current problem:
+- The project uses better-sqlite3 and raw SQL files in server/src/db.ts.
+- SQLite is not persisted or managed the same way as hosted Postgres.
+
+Migration approach:
+- Create the same schema in PostgreSQL.
+- Replace better-sqlite3 with pg (or postgres) for server queries.
+- Convert the seeded demo data to SQL inserts for Postgres.
+- Update all CRUD functions to use PostgreSQL syntax and parameterization.
+
+Required database tables to migrate:
+- users
+- systems
+- user_system_access
+- audit_logs
+- announcements
+- announcement_clicks
+- password_reset_tokens
+- custom_roles
+
+Important schema notes:
+- In SQLite, AUTOINCREMENT is used for some tables.
+- PostgreSQL uses SERIAL or GENERATED ALWAYS AS IDENTITY.
+- SQLite uses CURRENT_TIMESTAMP; PostgreSQL also supports it, but checks should be adjusted where needed.
+- SQLite CHECK constraints on role values must remain in Postgres.
+
+Recommended DB migration strategy:
+- Keep your current data model but recreate it in Postgres.
+- Use one migration file for schema creation and one seed file for demo data.
+- Keep the same user and system IDs to reduce UI breakage.
+
+Example PostgreSQL table pattern:
+CREATE TABLE systems (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  description TEXT NOT NULL,
+  color TEXT NOT NULL,
+  accent_bg TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  url TEXT,
+  alt_url TEXT
+);
+
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  avatar TEXT NOT NULL,
+  department TEXT NOT NULL,
+  is_super_admin INTEGER NOT NULL DEFAULT 0,
+  is_approved INTEGER NOT NULL DEFAULT 1
+);
+
+Step 4: Replace the SQLite database layer
+The backend uses functions such as:
+- getUserByEmail
+- getUserById
+- getAllSystems
+- createSystem
+- updateSystem
+- getDashboardSummary
+- createAuditLog
+- createAnnouncement
+
+These need to be rewritten to use PostgreSQL queries.
+
+Recommended pattern:
+- Keep the same function names for minimal code churn.
+- Replace better-sqlite3 with pg.
+- Use async database queries if the server is refactored to async handlers.
+- For a fast migration, keep Express endpoints as they are and use pg pool queries inside the same function structure.
+
+Step 5: Update the API configuration
+Current frontend proxy config points to localhost:3001.
+Production should not rely on a local proxy.
+
+In Vite (frontend):
+- remove hardcoded localhost assumptions
+- set API base from environment variables
+
+Example:
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+
+Then use API_BASE for all API requests.
+
+Step 6: Configure CORS for production
+The API must allow requests from the Vercel frontend domain.
+
+Example Express config:
+app.use(cors({
+  origin: ["https://your-frontend.vercel.app", "http://localhost:5173"],
+  credentials: true,
+}));
+
+Step 7: Deploy to Render
+Render deployment steps:
+1. Connect the GitHub repo.
+2. Choose the backend folder (server/)
+3. Configure build and start commands.
+4. Add environment variables.
+5. Deploy.
+6. Test the health endpoint:
+   https://your-render-app.onrender.com/api/health
+
+Expected response:
+{"ok": true}
+
+Step 8: Deploy to Vercel
+Vercel deployment steps:
+1. Import the frontend app to Vercel.
+2. Set environment variable:
+   VITE_API_URL=https://your-render-app.onrender.com
+3. Deploy.
+4. Confirm the frontend loads and signs in successfully.
+5. Confirm the API calls work against the Render service.
+
+Testing checklist
+- Frontend loads on Vercel
+- API health endpoint returns ok on Render
+- Login works
+- Role-based access works
+- Systems load from Postgres
+- Audit logs save correctly
+- User access assignments persist
+- SSO flows still work with public external URLs
+
+Common issues to watch
+- Localhost references remain in the frontend or API
+- SQLite database file is not included on server deployment
+- Postgres schema does not match app queries
+- API CORS blocks the frontend domain
+- Render app sleeps if no traffic is hitting it, causing first-request delays
+
+Recommended production hardening
+- Use HTTPS everywhere
+- Add a production secret manager for JWT/session tokens
+- Add database pooling and connection retries
+- Add migration scripts for Postgres
+- Add environment validation on startup
+- Run your app behind a reverse proxy only if needed
+
+Recommended final architecture
+- Vercel frontend: https://your-rba-app.vercel.app
+- Render API: https://your-rba-api.onrender.com
+- Postgres: Neon/Supabase instance
+
+Migration recommendation for this codebase
+- Do not try to deploy the current SQLite app directly to Vercel.
+- First migrate the database layer to Postgres.
+- Then move the API to Render.
+- Then deploy the frontend to Vercel.
+
+This is the cleanest route to public access outside your machine.
+
+Next steps
+1. Create PostgreSQL schema
+2. Replace better-sqlite3 with pg
+3. Rebuild the DB helper functions
+4. Update environment variables
+5. Deploy API to Render
+6. Deploy frontend to Vercel
+7. Test login and system access end to end
+
+If you want, the next step is to perform the actual migration in code so the project is fully ready for Vercel + Render + Postgres.

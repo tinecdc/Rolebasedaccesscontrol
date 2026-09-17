@@ -6,7 +6,8 @@ const SYSTEMS = [
   { id: "system-b", label: "Project Management System", description: "Project planning, milestones, and delivery tracking", color: "#7c3aed", accent_bg: "#ede9fe", tag: "Projects", url: "https://ndc-pms.transcend-enterprise.com/" },
   { id: "system-c", label: "Human Resource Information System", description: "HR, attendance, and workforce records", color: "#0891b2", accent_bg: "#cffafe", tag: "Human Resources", url: "https://hris.ndc.gov.ph/" },
   { id: "system-d", label: "Financial Management System", description: "Budgeting, procurement, and financial operations", color: "#059669", accent_bg: "#d1fae5", tag: "Finance", url: "https://fms.ndc.gov.ph/NDC_FMS" },
-  { id: "system-e", label: "Compliance Monitoring System", description: "Compliance tracking, monitoring, and reporting", color: "#d97706", accent_bg: "#fef3c7", tag: "Compliance", url: "http://localhost:5177/" },
+  { id: "system-e", label: "Compliance Monitoring System", description: "Compliance tracking, monitoring, and reporting", color: "#d97706", accent_bg: "#fef3c7", tag: "Compliance", url: "http://localhost:5174/" },
+  { id: "system-f", label: "IT Ticketing System", description: "IT requests, incidents, and service tracking", color: "#ef4444", accent_bg: "#fee2e2", tag: "IT Services", url: "http://localhost:5175/" },
 ];
 
 const USERS = [
@@ -14,8 +15,8 @@ const USERS = [
     id: "u1",
     email: "admin@company.com",
     password: "admin123",
-    name: "Alexandra Chen",
-    avatar: "AC",
+    name: "IT",
+    avatar: "IT",
     department: "IT Administration",
     is_super_admin: 1,
     systems: [
@@ -24,14 +25,15 @@ const USERS = [
       { system_id: "system-c", role: "admin" },
       { system_id: "system-d", role: "admin" },
       { system_id: "system-e", role: "admin" },
+      { system_id: "system-f", role: "admin" },
     ],
   },
   {
     id: "u2",
     email: "manager@company.com",
     password: "manager123",
-    name: "Marcus Rivera",
-    avatar: "MR",
+    name: "AGM",
+    avatar: "AGM",
     department: "Product",
     is_super_admin: 0,
     systems: [
@@ -44,8 +46,8 @@ const USERS = [
     id: "u3",
     email: "user@company.com",
     password: "user123",
-    name: "Priya Nair",
-    avatar: "PN",
+    name: "User",
+    avatar: "U",
     department: "Design",
     is_super_admin: 0,
     systems: [
@@ -53,20 +55,7 @@ const USERS = [
       { system_id: "system-d", role: "viewer" },
     ],
   },
-  {
-    id: "u4",
-    email: "ops@company.com",
-    password: "ops123",
-    name: "Jordan Lee",
-    avatar: "JL",
-    department: "Operations",
-    is_super_admin: 0,
-    systems: [
-      { system_id: "system-a", role: "manager" },
-      { system_id: "system-d", role: "manager" },
-      { system_id: "system-e", role: "viewer" },
-    ],
-  },
+  
 ];
 
 const ROLES = [

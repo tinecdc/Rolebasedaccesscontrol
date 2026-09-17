@@ -61,7 +61,6 @@ interface DashboardSummaryState {
   totalSystems: number;
   totalAccessEntries: number;
   auditLogCount: number;
-  smtpConfigured: boolean;
   recentActivity: Array<{ action: string; details: string | null; created_at: string }>;
 }
 
@@ -78,16 +77,49 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
   const { currentUser, logout, systemCatalog, refreshSystemCatalog } = useAuth();
 
   const openLinkedSystem = (system: SystemCatalogItem) => {
-    if (!system.url) {
+    const urlCandidates = [system.url, system.altUrl].filter((value): value is string => Boolean(value));
+    const primaryUrl = urlCandidates[0] ?? "";
+    const backupUrl = urlCandidates[1] ?? "";
+
+    if (!primaryUrl && !backupUrl) {
       onEnterSystem(system.id);
       return;
     }
 
-    if (system.id === "system-e") {
+    const localSsoTargets: Record<SystemId, string> = {
+      "system-e": "http://localhost:5174/",
+      "system-f": "http://localhost:5175/",
+    };
+
+    const resolvedLocalSsoUrl = (value?: string, fallback = "http://localhost:5175/") => {
+      if (value && /^https?:\/\/localhost:\d+\//.test(value)) {
+        return value;
+      }
+      return fallback;
+    };
+
+    const normalizedUrl = localSsoTargets[system.id]
+      ? resolvedLocalSsoUrl(primaryUrl || backupUrl, localSsoTargets[system.id])
+      : primaryUrl || backupUrl || "http://localhost:5175/";
+
+    const isLocalSsoSystem = Boolean(localSsoTargets[system.id]) || /^https?:\/\/localhost:\d+\//.test(primaryUrl || backupUrl || "");
+
+    if (isLocalSsoSystem) {
+      const storageKey = `rba_session_token_${system.id}`;
+      const token = (() => {
+        const existing = window.localStorage.getItem(storageKey);
+        if (existing) return existing;
+        const next = window.btoa(`${currentUser?.email ?? "unknown"}:${currentUser?.id ?? "anon"}:${system.id}:${Date.now()}:${Math.random().toString(16).slice(2)}`);
+        window.localStorage.setItem(storageKey, next);
+        return next;
+      })();
+
       const payload = {
         type: "rba-sso",
         source: "rba",
         sentAt: Date.now(),
+        token,
+        systemId: system.id,
         user: {
           id: currentUser?.id ?? "",
           name: currentUser?.name ?? "",
@@ -101,34 +133,68 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
           is_superuser: currentUser?.isSuperAdmin ? 1 : 0,
           permissions: ["read", "write", "manage"],
           systems: currentUser?.systems ?? [],
+          token,
         },
       };
 
-      const deliver = (targetWindow: Window | null) => {
-        try {
-          targetWindow?.postMessage(payload, "*");
-        } catch {
-          // ignore cross-window delivery errors
-        }
-      };
-
       const encoded = encodeURIComponent(btoa(JSON.stringify(payload)));
-      const targetUrl = new URL(system.url);
+      const targetUrl = new URL(normalizedUrl);
       targetUrl.searchParams.set("rbaSso", encoded);
 
-      const popup = window.open(targetUrl.toString(), "_blank", "width=1500,height=980");
-      if (!popup) {
-        window.location.href = targetUrl.toString();
+      const targetStr = targetUrl.toString();
+      const targetWindow = window.open(targetStr, "_blank");
+
+      if (!targetWindow) {
+        if (backupUrl) {
+          window.location.assign(new URL(backupUrl).toString());
+          return;
+        }
+        window.location.assign(targetStr);
         return;
       }
 
-      window.setTimeout(() => deliver(popup), 250);
-      window.setTimeout(() => deliver(popup), 1000);
-      window.setTimeout(() => deliver(popup), 2500);
+      let acknowledged = false;
+
+      const tryPost = () => {
+        try {
+          targetWindow.postMessage(payload, "*");
+        } catch {
+          // ignore cross-origin/post errors
+        }
+      };
+
+      tryPost();
+      const interval = window.setInterval(() => {
+        if (targetWindow.closed) {
+          window.clearInterval(interval);
+          return;
+        }
+        if (!acknowledged) tryPost();
+      }, 300);
+
+      const messageHandler = (event: MessageEvent) => {
+        if (event.source !== targetWindow) return;
+        const d = event.data as any;
+        if (d && d.type === "rba-sso-ack") {
+          acknowledged = true;
+          window.clearInterval(interval);
+          window.removeEventListener("message", messageHandler);
+        }
+      };
+
+      window.addEventListener("message", messageHandler);
+
+      window.setTimeout(() => {
+        if (!acknowledged) {
+          window.clearInterval(interval);
+          window.removeEventListener("message", messageHandler);
+        }
+      }, 6000);
+
       return;
     }
 
-    window.open(system.url, "_blank", "noopener,noreferrer");
+    window.location.assign(normalizedUrl);
   };
 
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
@@ -144,8 +210,6 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
   const [newDraft, setNewDraft] = useState<AccessDraft>({});
   const [newSystem, setNewSystem] = useState({ label: "", description: "", tag: "Operations", color: "#2563eb", accentBg: "#dbeafe" });
   const [creatingSystem, setCreatingSystem] = useState(false);
-  const [smtp, setSmtp] = useState({ host: "", port: 587, username: "", password: "", secure: false, fromEmail: "" });
-  const [smtpSaving, setSmtpSaving] = useState(false);
   const [auditLogs, setAuditLogs] = useState<Array<{ id: number; actor: string | null; action: string; details: string | null; created_at: string }>>([]);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummaryState>({
     totalUsers: 0,
@@ -153,7 +217,6 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
     totalSystems: 0,
     totalAccessEntries: 0,
     auditLogCount: 0,
-    smtpConfigured: false,
     recentActivity: [],
   });
   const [showAuditLogs, setShowAuditLogs] = useState(false);
@@ -230,26 +293,6 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
     }
   };
 
-  const loadSmtp = async () => {
-    if (!currentUser?.isSuperAdmin) return;
-    try {
-      const res = await fetch("/api/admin/smtp");
-      const data = (await res.json()) as { success?: boolean; smtp?: { host: string | null; port: number | null; username: string | null; password: string | null; secure: number; from_email: string | null } };
-      if (res.ok && data.success && data.smtp) {
-        setSmtp({
-          host: data.smtp.host ?? "",
-          port: data.smtp.port ?? 587,
-          username: data.smtp.username ?? "",
-          password: data.smtp.password ?? "",
-          secure: data.smtp.secure === 1,
-          fromEmail: data.smtp.from_email ?? "",
-        });
-      }
-    } catch {
-      // ignore
-    }
-  };
-
   const loadDashboardSummary = async () => {
     try {
       const res = await fetch("/api/admin/summary");
@@ -265,7 +308,6 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
   useEffect(() => {
     void loadUsers();
     void loadAuditLogs();
-    void loadSmtp();
     void loadDashboardSummary();
 
     // fetch custom roles for access selects
@@ -300,7 +342,6 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
     const interval = window.setInterval(() => {
       void loadUsers();
       void loadAuditLogs();
-      void loadSmtp();
       void loadDashboardSummary();
       setLiveUpdatedAt(formatPhilippineTime(new Date()));
     }, 15000);
@@ -442,45 +483,6 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
       setFeedback("Unable to reach server.");
     } finally {
       setCreatingSystem(false);
-    }
-  };
-
-  const saveSmtpConfig = async () => {
-    setSmtpSaving(true);
-    setFeedback(null);
-    try {
-      const res = await fetch("/api/admin/smtp", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          host: smtp.host,
-          port: smtp.port,
-          username: smtp.username,
-          password: smtp.password,
-          secure: smtp.secure,
-          fromEmail: smtp.fromEmail,
-        }),
-      });
-      const data = (await res.json()) as { success?: boolean; error?: string };
-      if (res.ok && data.success) {
-        setFeedback("SMTP settings saved. A real send can be wired next.");
-      } else {
-        setFeedback(data.error ?? "Unable to save SMTP settings.");
-      }
-    } catch {
-      setFeedback("Unable to reach server.");
-    } finally {
-      setSmtpSaving(false);
-    }
-  };
-
-  const testSmtp = async () => {
-    try {
-      const res = await fetch("/api/admin/smtp/test", { method: "POST" });
-      const data = (await res.json()) as { success?: boolean; message?: string };
-      setFeedback(data.message ?? (res.ok ? "SMTP test queued." : "Unable to test SMTP."));
-    } catch {
-      setFeedback("Unable to reach server.");
     }
   };
 
@@ -812,7 +814,7 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
                 { label: "Users", value: String(dashboardSummary.totalUsers || adminUsers.length + 1), detail: `${dashboardSummary.totalAdmins || adminUsers.filter((user) => user.isSuperAdmin).length} admins` },
                 { label: "Systems", value: String(dashboardSummary.totalSystems || systemIds.length), detail: `${visibleSystems.length} accessible` },
                 { label: "Alerts", value: String(Math.max(3, dashboardSummary.auditLogCount || auditLogs.length + 2)), detail: `${dashboardSummary.auditLogCount || auditLogs.length} recent events` },
-                { label: "Storage", value: `${Math.max(1, Math.round(((dashboardSummary.auditLogCount || auditLogs.length) + visibleSystems.length) / 6))}.0 GB`, detail: dashboardSummary.smtpConfigured ? "Live sync" : "SMTP pending" },
+                { label: "Storage", value: `${Math.max(1, Math.round(((dashboardSummary.auditLogCount || auditLogs.length) + visibleSystems.length) / 6))}.0 GB`, detail: "Live sync" },
               ].map((item) => (
                 <div key={item.label} className={`rounded-2xl border ${shellBorder} ${shellSurface} p-4`}>
                   <p className={`text-sm ${shellTextMuted}`}>{item.label}</p>
@@ -842,7 +844,7 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
                           key={systemId}
                           onClick={() => {
                             if (sys.url) {
-                              window.open(sys.url, "_blank", "noopener,noreferrer");
+                              openLinkedSystem(sys);
                               return;
                             }
                             onEnterSystem(systemId);
@@ -1085,7 +1087,7 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
                   <div className="mt-4 space-y-3">
                     {[
                       { title: "Access review due", detail: "4 users need role confirmation" },
-                      { title: "SMTP check needed", detail: "Mail delivery config is incomplete" },
+    
                       { title: "Audit export ready", detail: "Latest compliance export available" },
                     ].map((item) => (
                       <div key={item.title} className="rounded-2xl border border-white/10 bg-slate-950/80 p-3">
@@ -1107,7 +1109,7 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
                     {[
                       { label: "API response", value: "99.8%" },
                       { label: "Database", value: "Stable" },
-                      { label: "Mail relay", value: "Ready" },
+                      { label: "System sync", value: "Ready" },
                     ].map((item) => (
                       <div key={item.label} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm">
                         <span className="text-slate-300">{item.label}</span>
@@ -1169,30 +1171,6 @@ export function PortalHome({ onEnterSystem }: PortalHomeProps) {
                   </button>
                 </section>
 
-                <section className="rounded-3xl border border-white/10 bg-slate-900/80 p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.24em] text-slate-400">SMTP ready</p>
-                      <h3 className="mt-1 text-lg font-semibold text-white">Mail delivery settings</h3>
-                    </div>
-                    <Mail className="h-5 w-5 text-emerald-400" />
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    <input value={smtp.host} onChange={(e) => setSmtp((prev) => ({ ...prev, host: e.target.value }))} placeholder="SMTP host" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" />
-                    <input type="number" value={smtp.port} onChange={(e) => setSmtp((prev) => ({ ...prev, port: Number(e.target.value) }))} placeholder="Port" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" />
-                    <input value={smtp.username} onChange={(e) => setSmtp((prev) => ({ ...prev, username: e.target.value }))} placeholder="Username" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" />
-                    <input type="password" value={smtp.password} onChange={(e) => setSmtp((prev) => ({ ...prev, password: e.target.value }))} placeholder="Password" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" />
-                    <input value={smtp.fromEmail} onChange={(e) => setSmtp((prev) => ({ ...prev, fromEmail: e.target.value }))} placeholder="From email" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" />
-                    <label className="flex items-center gap-2 text-sm text-slate-300">
-                      <input type="checkbox" checked={smtp.secure} onChange={(e) => setSmtp((prev) => ({ ...prev, secure: e.target.checked }))} />
-                      Use TLS/SSL
-                    </label>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button onClick={saveSmtpConfig} disabled={smtpSaving} className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-200 disabled:opacity-60">{smtpSaving ? "Saving..." : "Save SMTP"}</button>
-                    <button onClick={testSmtp} className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-200">Test SMTP</button>
-                  </div>
-                </section>
               </div>
             )}
               </>

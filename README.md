@@ -20,6 +20,33 @@
 
   Open http://localhost:5173 and sign in with a demo account (e.g. `admin@company.com` / `admin123`).
 
+  ## Deploying to Vercel
+
+  This app is structured as a frontend + API split. The frontend is deployed to Vercel, while the Express API should run on a separate host such as Render.
+
+  ### Frontend env var
+
+  Create a Vercel environment variable:
+
+  ```bash
+  VITE_API_URL=https://your-render-api.onrender.com
+  ```
+
+  The frontend uses relative `/api/*` requests, and [vercel.json](vercel.json) rewrites those requests to the configured backend origin.
+
+  ### API env vars for Render
+
+  On the backend host, set:
+
+  ```bash
+  PORT=3001
+  NODE_ENV=production
+  CORS_ORIGIN=https://your-vercel-app.vercel.app
+  DATABASE_URL=postgresql://user:pass@host:5432/dbname
+  ```
+
+  This app currently uses local SQLite for development, so production deployment should move the database layer to Postgres before hosting the API externally.
+
   ## Database
 
   SQLite database is created automatically at `server/data/rba.db` on first server start, seeded with demo users and system access rules.

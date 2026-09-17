@@ -9,7 +9,7 @@ export function UsersTabContent({
   systemCatalog,
   refreshUsers,
 }: {
-  dashboardSummary: { totalUsers: number; totalAdmins: number; totalSystems: number; totalAccessEntries: number; auditLogCount: number; smtpConfigured: boolean; recentActivity: Array<{ action: string; details: string | null; created_at: string }> };
+  dashboardSummary: { totalUsers: number; totalAdmins: number; totalSystems: number; totalAccessEntries: number; auditLogCount: number; recentActivity: Array<{ action: string; details: string | null; created_at: string }> };
   adminUsers: Array<{ id: string; name: string; email: string; department: string; avatar: string; isSuperAdmin: boolean; systems: Array<{ systemId: string; role: string }> }>;
   currentUser: { isSuperAdmin: boolean } | null;
   systemCatalog: SystemCatalogItem[];

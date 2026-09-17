@@ -33,17 +33,6 @@ export function up(db: Database) {
       FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS smtp_settings (
-      id INTEGER PRIMARY KEY CHECK(id = 1),
-      host TEXT,
-      port INTEGER DEFAULT 587,
-      username TEXT,
-      password TEXT,
-      secure INTEGER DEFAULT 0,
-      from_email TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
     CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       actor TEXT,

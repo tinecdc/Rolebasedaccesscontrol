@@ -5,7 +5,7 @@ export function ExportReportsTabContent({
   dashboardSummary,
 }: {
   auditLogs: Array<{ id: number; actor: string | null; action: string; details: string | null; created_at: string }>;
-  dashboardSummary: { totalUsers: number; totalAdmins: number; totalSystems: number; totalAccessEntries: number; auditLogCount: number; smtpConfigured: boolean; recentActivity: Array<{ action: string; details: string | null; created_at: string }> };
+  dashboardSummary: { totalUsers: number; totalAdmins: number; totalSystems: number; totalAccessEntries: number; auditLogCount: number; recentActivity: Array<{ action: string; details: string | null; created_at: string }> };
 }) {
   const handleExportJSON = () => {
     const payload = {

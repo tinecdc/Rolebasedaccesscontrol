@@ -17,7 +17,7 @@ export function DashboardTabContent({
   filteredVisibleSystems: Array<{ systemId: string; role: string }>;
   onEnterSystem: (id: string) => void;
   systemCatalog: SystemCatalogItem[];
-  dashboardSummary: { totalUsers: number; totalAdmins: number; totalSystems: number; totalAccessEntries: number; auditLogCount: number; smtpConfigured: boolean; recentActivity: Array<{ action: string; details: string | null; created_at: string }> };
+  dashboardSummary: { totalUsers: number; totalAdmins: number; totalSystems: number; totalAccessEntries: number; auditLogCount: boolean; recentActivity: Array<{ action: string; details: string | null; created_at: string }> };
   auditLogs: Array<{ id: number; actor: string | null; action: string; details: string | null; created_at: string }>;
   setActiveSection: (section: "dashboard" | "users" | "roles" | "systems" | "reports" | "settings" | "audit") => void;
   systemIds: string[];

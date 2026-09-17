@@ -30,7 +30,7 @@ export function AnnouncementsTabContent({
 
   useEffect(() => {
     void loadRecent();
-  }, []);
+  }, [currentUser?.email]);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -189,7 +189,7 @@ export function AnnouncementsTabContent({
                 <Send className="h-4 w-4 mr-2 inline-block" />
                 Send Announcement
               </button>
-              <button onClick={() => void send(true)} disabled={loading} className="flex-1 rounded-xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800">
+              <button onClick={() => void send(true)} disabled={loading || !scheduledAt} className="flex-1 rounded-xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800">
                 Schedule for later
               </button>
             </div>

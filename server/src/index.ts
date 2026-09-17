@@ -13,11 +13,9 @@ import {
   getAllUsers,
   getAuditLogs,
   getDashboardSummary,
-  getSmtpSettings,
   getUserByEmail,
   getUserById,
   initSchema,
-  saveSmtpSettings,
   updateSystem,
   updateUserPassword,
   updateUserSystemAccess,
@@ -45,9 +43,31 @@ void (async () => {
 })();
 
 const app = express();
-const PORT = process.env.PORT ?? 3001;
+const PORT = Number(process.env.PORT ?? 3001);
+const configuredOrigins = (process.env.CORS_ORIGIN ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
+  "http://127.0.0.1:5175",
+  ...configuredOrigins,
+]);
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
@@ -171,13 +191,14 @@ app.get("/api/admin/systems", (_req, res) => {
 });
 
 app.post("/api/admin/systems", (req, res) => {
-  const { label, description, color, accentBg, tag, url } = req.body as {
+  const { label, description, color, accentBg, tag, url, altUrl } = req.body as {
     label?: string;
     description?: string;
     color?: string;
     accentBg?: string;
     tag?: string;
     url?: string;
+    altUrl?: string | null;
   };
 
   if (!label) {
@@ -200,6 +221,7 @@ app.post("/api/admin/systems", (req, res) => {
     accentBg: accentBg ?? "#e2e8f0",
     tag: tag ?? "Operations",
     url: url ?? null,
+    altUrl: altUrl ?? null,
   });
 
   createAuditLog({ actor: "admin", action: "system.created", details: `${label} added to the catalog` });
@@ -208,17 +230,18 @@ app.post("/api/admin/systems", (req, res) => {
 
 app.put("/api/admin/systems/:systemId", (req, res) => {
   const { systemId } = req.params;
-  const { label, description, color, accentBg, tag, url } = req.body as {
+  const { label, description, color, accentBg, tag, url, altUrl } = req.body as {
     label?: string;
     description?: string;
     color?: string;
     accentBg?: string;
     tag?: string;
     url?: string | null;
+    altUrl?: string | null;
   };
 
   try {
-    const updated = updateSystem(systemId, { label, description, color, accentBg, tag, url });
+    const updated = updateSystem(systemId, { label, description, color, accentBg, tag, url, altUrl });
     if (!updated) {
       res.status(404).json({ success: false, error: "System not found." });
       return;
@@ -322,39 +345,6 @@ app.put("/api/admin/users/:userId/access", (req, res) => {
   res.json({ success: true, user: buildUserResponse(updatedUser) });
 });
 
-app.get("/api/admin/smtp", (_req, res) => {
-  const smtp = getSmtpSettings();
-  res.json({ success: true, smtp });
-});
-
-app.put("/api/admin/smtp", (req, res) => {
-  const config = req.body as {
-    host?: string;
-    port?: number;
-    username?: string;
-    password?: string;
-    secure?: boolean;
-    fromEmail?: string;
-  };
-
-  const smtp = saveSmtpSettings({
-    host: config.host ?? "",
-    port: config.port ?? 587,
-    username: config.username ?? "",
-    password: config.password ?? "",
-    secure: config.secure ?? false,
-    fromEmail: config.fromEmail ?? "",
-  });
-
-  createAuditLog({ actor: "admin", action: "smtp.config.updated", details: "SMTP settings updated" });
-  res.json({ success: true, smtp });
-});
-
-app.post("/api/admin/smtp/test", (_req, res) => {
-  createAuditLog({ actor: "admin", action: "smtp.test.requested", details: "SMTP test requested" });
-  res.json({ success: true, message: "SMTP configuration is ready. Connect your provider credentials to send a real test message." });
-});
-
 app.get("/api/admin/audit-logs", (_req, res) => {
   const { start, end, action } = _req.query as { start?: string; end?: string; action?: string };
   const logs = getAuditLogs(100, { start: start ?? null, end: end ?? null, action: action ?? null });
@@ -406,6 +396,14 @@ app.post("/api/admin/announcements", (req, res) => {
 
   try {
     const id = randomUUID().replace(/-/g, "").slice(0, 12);
+    // normalize scheduledAt to 'YYYY-MM-DD HH:MM:SS' if provided
+    let scheduledNormalized: string | null = null;
+    if (scheduledAt) {
+      let s = scheduledAt;
+      // handle datetime-local value like '2026-09-02T14:30' or with seconds
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) s = s + ":00";
+      scheduledNormalized = s.replace("T", " ");
+    }
     const created = createAnnouncement({
       id,
       title,
@@ -416,7 +414,7 @@ app.post("/api/admin/announcements", (req, res) => {
       attachmentUrl: attachmentUrl ?? null,
       attachmentData: attachmentData ?? null,
       attachmentName: attachmentName ?? null,
-      scheduledAt: scheduledAt ?? null,
+      scheduledAt: scheduledNormalized ?? null,
       createdBy: createdBy ?? "admin",
     });
     createAuditLog({ actor: createdBy ?? "admin", action: "announcement.created", details: title });

@@ -9,7 +9,8 @@ const DEFAULT_SYSTEM_CATALOG: SystemCatalogItem[] = [
   { id: "system-b", label: "Project Management System", description: "Project planning, milestones, and delivery tracking", color: "#7c3aed", accentBg: "#ede9fe", tag: "Projects", url: "https://ndc-pms.transcend-enterprise.com/" },
   { id: "system-c", label: "Human Resource Information System", description: "HR, attendance, and workforce records", color: "#0891b2", accentBg: "#cffafe", tag: "Human Resources", url: "https://hris.ndc.gov.ph/" },
   { id: "system-d", label: "Financial Management System", description: "Budgeting, procurement, and financial operations", color: "#059669", accentBg: "#d1fae5", tag: "Finance", url: "https://fms.ndc.gov.ph/NDC_FMS" },
-  { id: "system-e", label: "Compliance Monitoring System", description: "Compliance tracking, monitoring, and reporting", color: "#d97706", accentBg: "#fef3c7", tag: "Compliance", url: "http://localhost:5177/" },
+  { id: "system-e", label: "Compliance Monitoring System", description: "Compliance tracking, monitoring, and reporting", color: "#d97706", accentBg: "#fef3c7", tag: "Compliance", url: "http://localhost:5174/" },
+  { id: "system-f", label: "IT Ticketing System", description: "IT requests, incidents, and service tracking", color: "#ef4444", accentBg: "#fee2e2", tag: "IT Services", url: "http://localhost:5175/" },
 ];
 
 export interface SystemAccess {
@@ -25,6 +26,7 @@ export interface SystemCatalogItem {
   accentBg: string;
   tag: string;
   url?: string;
+  altUrl?: string | null;
 }
 
 export interface User {

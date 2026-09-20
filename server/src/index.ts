@@ -40,8 +40,8 @@ void (async () => {
   } catch (err) {
     // ignore migration errors in dev
   }
-  initSchema();
-  seedDatabase();
+  await initSchema();
+  await seedDatabase();
 })();
 
 const app = express();
@@ -77,46 +77,46 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body as { email?: string; password?: string };
 
   if (!email || !password) {
-    createAuditLog({ action: "auth.login.failed", details: "Missing credentials" });
+    await createAuditLog({ action: "auth.login.failed", details: "Missing credentials" });
     res.status(400).json({ success: false, error: "Email and password are required." });
     return;
   }
 
-  const user = getUserByEmail(email);
+  const user = await getUserByEmail(email);
   if (!user) {
-    createAuditLog({ actor: email, action: "auth.login.failed", details: "Account not found" });
+    await createAuditLog({ actor: email, action: "auth.login.failed", details: "Account not found" });
     res.status(401).json({ success: false, error: "No account found with that email." });
     return;
   }
 
   const valid = bcrypt.compareSync(password, user.password_hash);
   if (!valid) {
-    createAuditLog({ actor: email, action: "auth.login.failed", details: "Invalid password" });
+    await createAuditLog({ actor: email, action: "auth.login.failed", details: "Invalid password" });
     res.status(401).json({ success: false, error: "Incorrect password." });
     return;
   }
   if (user.is_approved !== 1) {
-    createAuditLog({ actor: user.email, action: "auth.login.blocked", details: "Account pending approval" });
+    await createAuditLog({ actor: user.email, action: "auth.login.blocked", details: "Account pending approval" });
     res.status(403).json({ success: false, error: "Account pending approval. An administrator must approve your registration." });
     return;
   }
 
-  createAuditLog({ actor: user.email, action: "auth.login.success", details: "User signed in" });
-  res.json({ success: true, user: buildUserResponse(user) });
+  await createAuditLog({ actor: user.email, action: "auth.login.success", details: "User signed in" });
+  res.json({ success: true, user: await buildUserResponse(user) });
 });
 
-app.post("/api/public/register", (req, res) => {
+app.post("/api/public/register", async (req, res) => {
   const { email, password, name, avatar, department } = req.body as { email?: string; password?: string; name?: string; avatar?: string; department?: string };
   if (!email || !password || !name) {
     res.status(400).json({ success: false, error: "email, password and name are required" });
     return;
   }
 
-  const existing = getUserByEmail(email);
+  const existing = await getUserByEmail(email);
   if (existing) {
     res.status(409).json({ success: false, error: "A user with that email already exists." });
     return;
@@ -124,7 +124,7 @@ app.post("/api/public/register", (req, res) => {
 
   try {
     const password_hash = bcrypt.hashSync(password, 10);
-    const user = createUser({
+    const user = await createUser({
       email,
       password_hash,
       name,
@@ -135,7 +135,7 @@ app.post("/api/public/register", (req, res) => {
       systems: [],
     });
 
-    createAuditLog({ actor: email, action: "user.registration.submitted", details: `Registration submitted for ${name}` });
+    await createAuditLog({ actor: email, action: "user.registration.submitted", details: `Registration submitted for ${name}` });
     res.json({ success: true, user });
   } catch (err: any) {
     console.error(err);
@@ -143,18 +143,18 @@ app.post("/api/public/register", (req, res) => {
   }
 });
 
-app.post("/api/auth/forgot-password", (req, res) => {
+app.post("/api/auth/forgot-password", async (req, res) => {
   const { email } = req.body as { email?: string };
   if (!email) {
     res.status(400).json({ success: false, error: "Email is required." });
     return;
   }
 
-  const user = getUserByEmail(email);
+  const user = await getUserByEmail(email);
   const token = randomUUID().replace(/-/g, "").slice(0, 12);
   if (user) {
-    createPasswordResetToken(email, token);
-    createAuditLog({ actor: email, action: "auth.password-reset.requested", details: "Password reset requested" });
+    await createPasswordResetToken(email, token);
+    await createAuditLog({ actor: email, action: "auth.password-reset.requested", details: "Password reset requested" });
   }
 
   res.json({
@@ -164,35 +164,35 @@ app.post("/api/auth/forgot-password", (req, res) => {
   });
 });
 
-app.post("/api/auth/reset-password", (req, res) => {
+app.post("/api/auth/reset-password", async (req, res) => {
   const { email, token, password } = req.body as { email?: string; token?: string; password?: string };
   if (!email || !token || !password) {
     res.status(400).json({ success: false, error: "Email, token and a new password are required." });
     return;
   }
 
-  const resetRecord = consumePasswordResetToken(email, token);
+  const resetRecord = await consumePasswordResetToken(email, token);
   if (!resetRecord) {
     res.status(400).json({ success: false, error: "That reset token is invalid or expired." });
     return;
   }
 
-  const user = getUserByEmail(email);
+  const user = await getUserByEmail(email);
   if (!user) {
     res.status(404).json({ success: false, error: "Account not found." });
     return;
   }
 
-  updateUserPassword(user.id, bcrypt.hashSync(password, 10));
-  createAuditLog({ actor: email, action: "auth.password-reset.completed", details: "Password reset complete" });
+  await updateUserPassword(user.id, bcrypt.hashSync(password, 10));
+  await createAuditLog({ actor: email, action: "auth.password-reset.completed", details: "Password reset complete" });
   res.json({ success: true, message: "Password updated. You can sign in with your new password." });
 });
 
-app.get("/api/admin/systems", (_req, res) => {
-  res.json({ success: true, systems: getAllSystems() });
+app.get("/api/admin/systems", async (_req, res) => {
+  res.json({ success: true, systems: await getAllSystems() });
 });
 
-app.post("/api/admin/systems", (req, res) => {
+app.post("/api/admin/systems", async (req, res) => {
   const { label, description, color, accentBg, tag, url, altUrl } = req.body as {
     label?: string;
     description?: string;
@@ -215,7 +215,7 @@ app.post("/api/admin/systems", (req, res) => {
     .replace(/(^-|-$)/g, "") || "custom-system";
   const systemId = `system-${baseId}`;
 
-  const created = createSystem({
+  const created = await createSystem({
     id: systemId,
     label,
     description: description ?? "Newly added system",
@@ -226,11 +226,11 @@ app.post("/api/admin/systems", (req, res) => {
     altUrl: altUrl ?? null,
   });
 
-  createAuditLog({ actor: "admin", action: "system.created", details: `${label} added to the catalog` });
+  await createAuditLog({ actor: "admin", action: "system.created", details: `${label} added to the catalog` });
   res.json({ success: true, system: created });
 });
 
-app.put("/api/admin/systems/:systemId", (req, res) => {
+app.put("/api/admin/systems/:systemId", async (req, res) => {
   const { systemId } = req.params;
   const { label, description, color, accentBg, tag, url, altUrl } = req.body as {
     label?: string;
@@ -243,12 +243,12 @@ app.put("/api/admin/systems/:systemId", (req, res) => {
   };
 
   try {
-    const updated = updateSystem(systemId, { label, description, color, accentBg, tag, url, altUrl });
+    const updated = await updateSystem(systemId, { label, description, color, accentBg, tag, url, altUrl });
     if (!updated) {
       res.status(404).json({ success: false, error: "System not found." });
       return;
     }
-    createAuditLog({ actor: "admin", action: "system.updated", details: `${systemId} updated` });
+    await createAuditLog({ actor: "admin", action: "system.updated", details: `${systemId} updated` });
     res.json({ success: true, system: updated });
   } catch (err: any) {
     console.error(err);
@@ -377,7 +377,7 @@ app.get("/api/announcements", (_req, res) => {
   }
 });
 
-app.post("/api/admin/announcements", (req, res) => {
+app.post("/api/admin/announcements", async (req, res) => {
   const { title, message, priority, audienceType, audience, attachmentUrl, attachmentData, attachmentName, scheduledAt, createdBy } = req.body as {
     title?: string;
     message?: string;
@@ -398,15 +398,13 @@ app.post("/api/admin/announcements", (req, res) => {
 
   try {
     const id = randomUUID().replace(/-/g, "").slice(0, 12);
-    // normalize scheduledAt to 'YYYY-MM-DD HH:MM:SS' if provided
     let scheduledNormalized: string | null = null;
     if (scheduledAt) {
       let s = scheduledAt;
-      // handle datetime-local value like '2026-09-02T14:30' or with seconds
       if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) s = s + ":00";
       scheduledNormalized = s.replace("T", " ");
     }
-    const created = createAnnouncement({
+    const created = await createAnnouncement({
       id,
       title,
       message,
@@ -419,7 +417,7 @@ app.post("/api/admin/announcements", (req, res) => {
       scheduledAt: scheduledNormalized ?? null,
       createdBy: createdBy ?? "admin",
     });
-    createAuditLog({ actor: createdBy ?? "admin", action: "announcement.created", details: title });
+    await createAuditLog({ actor: createdBy ?? "admin", action: "announcement.created", details: title });
     res.json({ success: true, announcement: created });
   } catch (err: any) {
     console.error(err);
@@ -427,21 +425,21 @@ app.post("/api/admin/announcements", (req, res) => {
   }
 });
 
-app.post("/api/announcements/:id/click", (req, res) => {
+app.post("/api/announcements/:id/click", async (req, res) => {
   const { id } = req.params;
   const { userEmail } = req.body as { userEmail?: string };
   try {
-    recordAnnouncementClick(id, userEmail ?? null);
+    await recordAnnouncementClick(id, userEmail ?? null);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: "Unable to record click." });
   }
 });
 
-app.get("/api/admin/announcements/:id/clicks", (req, res) => {
+app.get("/api/admin/announcements/:id/clicks", async (req, res) => {
   const { id } = req.params;
   try {
-    const clicks = getAnnouncementClicks(id);
+    const clicks = await getAnnouncementClicks(id);
     res.json({ success: true, clicks });
   } catch (err: any) {
     res.status(500).json({ success: false, error: "Unable to query clicks." });
@@ -449,16 +447,16 @@ app.get("/api/admin/announcements/:id/clicks", (req, res) => {
 });
 
 // Custom roles API
-app.get("/api/admin/roles", (_req, res) => {
+app.get("/api/admin/roles", async (_req, res) => {
   try {
-    const roles = getAllCustomRoles();
+    const roles = await getAllCustomRoles();
     res.json({ success: true, roles });
   } catch (err: any) {
     res.status(500).json({ success: false, error: "Unable to list roles." });
   }
 });
 
-app.post("/api/admin/roles", (req, res) => {
+app.post("/api/admin/roles", async (req, res) => {
   const { name, description } = req.body as { name?: string; description?: string };
   if (!name) {
     res.status(400).json({ success: false, error: "Role name is required." });
@@ -466,35 +464,35 @@ app.post("/api/admin/roles", (req, res) => {
   }
   try {
     const id = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const created = createCustomRole({ id, name, description });
-    createAuditLog({ actor: "admin", action: "role.created", details: name });
+    const created = await createCustomRole({ id, name, description });
+    await createAuditLog({ actor: "admin", action: "role.created", details: name });
     res.json({ success: true, role: created });
   } catch (err: any) {
     res.status(500).json({ success: false, error: "Unable to create role." });
   }
 });
 
-app.put("/api/admin/roles/:roleId", (req, res) => {
+app.put("/api/admin/roles/:roleId", async (req, res) => {
   const { roleId } = req.params;
   const { name, description } = req.body as { name?: string; description?: string };
   try {
-    const updated = updateCustomRole(roleId, { name, description });
+    const updated = await updateCustomRole(roleId, { name, description });
     if (!updated) {
       res.status(404).json({ success: false, error: "Role not found." });
       return;
     }
-    createAuditLog({ actor: "admin", action: "role.updated", details: updated.name });
+    await createAuditLog({ actor: "admin", action: "role.updated", details: updated.name });
     res.json({ success: true, role: updated });
   } catch (err: any) {
     res.status(500).json({ success: false, error: "Unable to update role." });
   }
 });
 
-app.delete("/api/admin/roles/:roleId", (req, res) => {
+app.delete("/api/admin/roles/:roleId", async (req, res) => {
   const { roleId } = req.params;
   try {
-    deleteCustomRole(roleId);
-    createAuditLog({ actor: "admin", action: "role.deleted", details: roleId });
+    await deleteCustomRole(roleId);
+    await createAuditLog({ actor: "admin", action: "role.deleted", details: roleId });
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: "Unable to delete role." });

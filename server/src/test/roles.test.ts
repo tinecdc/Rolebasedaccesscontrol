@@ -7,40 +7,42 @@ import {
   deleteCustomRole,
   createAnnouncement,
   getRecentAnnouncements,
+  getDatabaseMode,
 } from "../db.js";
 
 async function main() {
+  assert(["sqlite", "postgres"].includes(getDatabaseMode()), "Unsupported database mode");
   await runMigrations();
 
   const id = `rtest_${Date.now().toString(36)}`;
   // Ensure id not present
-  const before = getAllCustomRoles();
+  const before = await getAllCustomRoles();
   if (before.find((r) => r.id === id)) {
-    deleteCustomRole(id);
+    await deleteCustomRole(id);
   }
 
   // Create
-  createCustomRole({ id, name: "Integration Test Role", description: "Created by test" });
-  let roles = getAllCustomRoles();
+  await createCustomRole({ id, name: "Integration Test Role", description: "Created by test" });
+  let roles = await getAllCustomRoles();
   const created = roles.find((r) => r.id === id);
   assert(created, "Role was not created");
   assert.strictEqual(created!.name, "Integration Test Role");
 
   // Update
-  updateCustomRole(id, { name: "Integration Role Updated", description: "Updated by test" });
-  roles = getAllCustomRoles();
+  await updateCustomRole(id, { name: "Integration Role Updated", description: "Updated by test" });
+  roles = await getAllCustomRoles();
   const updated = roles.find((r) => r.id === id);
   assert(updated, "Role not found after update");
   assert.strictEqual(updated!.name, "Integration Role Updated");
 
   // Delete
-  deleteCustomRole(id);
-  roles = getAllCustomRoles();
+  await deleteCustomRole(id);
+  roles = await getAllCustomRoles();
   const deleted = roles.find((r) => r.id === id);
   assert(!deleted, "Role still present after delete");
 
   const announcementId = `ann_${Date.now().toString(36)}`;
-  createAnnouncement({
+  await createAnnouncement({
     id: announcementId,
     title: "Quarterly system update",
     message: "All teams should review the change log.",
@@ -53,7 +55,7 @@ async function main() {
     createdBy: "admin@company.com",
   });
 
-  const announcements = getRecentAnnouncements();
+  const announcements = await getRecentAnnouncements();
   const createdAnnouncement = announcements.find((a) => a.id === announcementId);
   assert(createdAnnouncement, "Announcement was not created");
   assert.strictEqual(createdAnnouncement!.title, "Quarterly system update");

@@ -18,9 +18,16 @@ export function getDatabaseMode(): DatabaseMode {
   return process.env.DATABASE_URL ? "postgres" : "sqlite";
 }
 
-export const sqliteDb = new Database(dbPath);
-sqliteDb.pragma("journal_mode = WAL");
-sqliteDb.pragma("foreign_keys = ON");
+let sqliteDb: Database.Database | null = null;
+
+function getSqliteDb(): Database.Database {
+  if (!sqliteDb) {
+    sqliteDb = new Database(dbPath);
+    sqliteDb.pragma("journal_mode = WAL");
+    sqliteDb.pragma("foreign_keys = ON");
+  }
+  return sqliteDb;
+}
 
 export const pgPool = process.env.DATABASE_URL
   ? new Pool({
@@ -29,7 +36,11 @@ export const pgPool = process.env.DATABASE_URL
     })
   : null;
 
-export const db = sqliteDb;
+export const db = new Proxy({} as Database.Database, {
+  get(target, prop) {
+    return (getSqliteDb() as any)[prop];
+  },
+});
 
 export async function initSchema() {
   if (getDatabaseMode() === "postgres") {

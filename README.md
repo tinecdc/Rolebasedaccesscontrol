@@ -42,10 +42,11 @@
   PORT=3001
   NODE_ENV=production
   CORS_ORIGIN=https://your-vercel-app.vercel.app
-  DATABASE_URL=postgresql://user:pass@host:5432/dbname
+  # For production use MySQL (or set to nothing to use local SQLite)
+  DATABASE_URL=mysql://user:password@host:3306/database_name
   ```
 
-  This app currently uses local SQLite for development, so production deployment should move the database layer to Postgres before hosting the API externally.
+  This app uses local SQLite for development by default. Set `DATABASE_URL` to a MySQL connection string to run the API against MySQL in production.
 
   ## Database
 

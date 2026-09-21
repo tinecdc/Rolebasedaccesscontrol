@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { Pool } from "pg";
+import mysql from "mysql2/promise";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -12,10 +12,12 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-export type DatabaseMode = "sqlite" | "postgres";
+export type DatabaseMode = "sqlite" | "mysql";
 
 export function getDatabaseMode(): DatabaseMode {
-  return process.env.DATABASE_URL ? "postgres" : "sqlite";
+  const url = process.env.MYSQL_DATABASE_URL ?? process.env.MYSQL_URL ?? process.env.DATABASE_URL;
+  if (!url) return "sqlite";
+  return "mysql";
 }
 
 let sqliteDb: Database.Database | null = null;
@@ -29,22 +31,28 @@ function getSqliteDb(): Database.Database {
   return sqliteDb;
 }
 
-let pgPoolInstance: Pool | null = null;
+let mysqlPoolInstance: mysql.Pool | null = null;
 
-export function getPgPool(): Pool {
-  if (!pgPoolInstance) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is required for Postgres mode but not set");
-    }
-    pgPoolInstance = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
-    });
+export function getMysqlPool(): mysql.Pool {
+  if (!mysqlPoolInstance) {
+    const conn = process.env.DATABASE_URL ?? process.env.MYSQL_DATABASE_URL ?? process.env.MYSQL_URL;
+    if (!conn) throw new Error("DATABASE_URL (or MYSQL_DATABASE_URL) is required for MySQL mode but not set");
+    // mysql.createPool accepts a connection string
+    mysqlPoolInstance = mysql.createPool(conn as any);
   }
-  return pgPoolInstance;
+  return mysqlPoolInstance;
 }
 
-export const pgPool: Pool | null = null;
+export async function runSql(sql: string, params: any[] = []) {
+  const mode = getDatabaseMode();
+  if (mode === "mysql") {
+    // convert $1, $2.. placeholders to ? for mysql
+    const converted = sql.replace(/\$\d+/g, "?");
+    const [rows] = await getMysqlPool().query(converted, params);
+    return rows as any[];
+  }
+  throw new Error("runSql is only for MySQL pool mode");
+}
 
 export const db = new Proxy({} as Database.Database, {
   get(target, prop) {
@@ -53,9 +61,8 @@ export const db = new Proxy({} as Database.Database, {
 });
 
 export async function initSchema() {
-  if (getDatabaseMode() === "postgres") {
-    const pool = getPgPool();
-    await pool.query(`
+  if (getDatabaseMode() === "mysql") {
+    await runSql(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
@@ -81,18 +88,18 @@ export async function initSchema() {
       CREATE TABLE IF NOT EXISTS user_system_access (
         user_id TEXT NOT NULL,
         system_id TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('admin', 'manager', 'viewer')),
+        role TEXT NOT NULL,
         PRIMARY KEY (user_id, system_id),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
       );
 
       CREATE TABLE IF NOT EXISTS audit_logs (
-        id SERIAL PRIMARY KEY,
+        id INT PRIMARY KEY AUTO_INCREMENT,
         actor TEXT,
         action TEXT NOT NULL,
         details TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS announcements (
@@ -107,20 +114,20 @@ export async function initSchema() {
         attachment_name TEXT,
         scheduled_at TEXT,
         created_by TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS announcement_clicks (
-        id SERIAL PRIMARY KEY,
+        id INT PRIMARY KEY AUTO_INCREMENT,
         announcement_id TEXT NOT NULL,
         user_email TEXT,
-        clicked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        clicked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS password_reset_tokens (
         id TEXT PRIMARY KEY,
         email TEXT NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
         used INTEGER NOT NULL DEFAULT 0
       );
 
@@ -301,33 +308,33 @@ function normalizeUserRow(row: any): UserRow {
 }
 
 export async function getUserByEmail(email: string): Promise<UserRow | undefined> {
-  if (getDatabaseMode() === "postgres") {
-    const result = await getPgPool().query("SELECT * FROM users WHERE lower(email) = lower($1)", [email]);
-    return result.rows[0] ? normalizeUserRow(result.rows[0]) : undefined;
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT * FROM users WHERE lower(email) = lower($1)", [email]);
+    return rows[0] ? normalizeUserRow(rows[0]) : undefined;
   }
   return db.prepare("SELECT * FROM users WHERE lower(email) = lower(?)").get(email) as UserRow | undefined;
 }
 
 export async function getUserById(userId: string): Promise<UserRow | undefined> {
-  if (getDatabaseMode() === "postgres") {
-    const result = await getPgPool().query("SELECT * FROM users WHERE id = $1", [userId]);
-    return result.rows[0] ? normalizeUserRow(result.rows[0]) : undefined;
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT * FROM users WHERE id = $1", [userId]);
+    return rows[0] ? normalizeUserRow(rows[0]) : undefined;
   }
   return db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
 }
 
 export async function getAllUsers(): Promise<UserRow[]> {
-  if (getDatabaseMode() === "postgres") {
-    const result = await getPgPool().query("SELECT * FROM users ORDER BY name");
-    return result.rows.map(normalizeUserRow);
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT * FROM users ORDER BY name");
+    return rows.map(normalizeUserRow);
   }
   return db.prepare("SELECT * FROM users ORDER BY name").all() as UserRow[];
 }
 
 export async function getAllSystems(): Promise<SystemSummary[]> {
-  if (getDatabaseMode() === "postgres") {
-    const result = await getPgPool().query("SELECT id, label, description, color, accent_bg, tag, url, alt_url FROM systems ORDER BY label");
-    return result.rows.map((row: any) => ({
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT id, label, description, color, accent_bg, tag, url, alt_url FROM systems ORDER BY label");
+    return rows.map((row: any) => ({
       id: row.id,
       label: row.label,
       description: row.description,
@@ -351,11 +358,8 @@ export async function getAllSystems(): Promise<SystemSummary[]> {
 }
 
 export async function createSystem(opts: { id: string; label: string; description: string; color: string; accentBg: string; tag: string; url?: string | null; altUrl?: string | null }): Promise<SystemSummary> {
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query(
-      "INSERT INTO systems (id, label, description, color, accent_bg, tag, url, alt_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-      [opts.id, opts.label, opts.description, opts.color, opts.accentBg, opts.tag, opts.url ?? null, opts.altUrl ?? null],
-    );
+  if (getDatabaseMode() === "mysql") {
+    await runSql("INSERT INTO systems (id, label, description, color, accent_bg, tag, url, alt_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [opts.id, opts.label, opts.description, opts.color, opts.accentBg, opts.tag, opts.url ?? null, opts.altUrl ?? null]);
     return {
       id: opts.id,
       label: opts.label,
@@ -395,12 +399,12 @@ export async function createSystem(opts: { id: string; label: string; descriptio
 }
 
 export async function updateSystem(id: string, opts: { label?: string; description?: string; color?: string; accentBg?: string; tag?: string; url?: string | null; altUrl?: string | null }) {
-  if (getDatabaseMode() === "postgres") {
+  if (getDatabaseMode() === "mysql") {
     const row = await getUserById(id);
     if (!row) return null;
-    const existing = await getPgPool().query("SELECT * FROM systems WHERE id = $1", [id]);
-    if (!existing.rows[0]) return null;
-    const current = existing.rows[0];
+    const existing = await runSql("SELECT * FROM systems WHERE id = $1", [id]);
+    if (!existing[0]) return null;
+    const current = existing[0];
     const label = opts.label ?? current.label;
     const description = opts.description ?? current.description;
     const color = opts.color ?? current.color;
@@ -408,12 +412,9 @@ export async function updateSystem(id: string, opts: { label?: string; descripti
     const tag = opts.tag ?? current.tag;
     const url = typeof opts.url === "undefined" ? current.url : opts.url;
     const altUrl = typeof opts.altUrl === "undefined" ? current.alt_url : opts.altUrl;
-    await getPgPool().query(
-      "UPDATE systems SET label = $1, description = $2, color = $3, accent_bg = $4, tag = $5, url = $6, alt_url = $7 WHERE id = $8",
-      [label, description, color, accentBg, tag, url, altUrl, id],
-    );
-    const updated = await getPgPool().query("SELECT id, label, description, color, accent_bg, tag, url, alt_url FROM systems WHERE id = $1", [id]);
-    const rowOut = updated.rows[0];
+    await runSql("UPDATE systems SET label = $1, description = $2, color = $3, accent_bg = $4, tag = $5, url = $6, alt_url = $7 WHERE id = $8", [label, description, color, accentBg, tag, url, altUrl, id]);
+    const updated = await runSql("SELECT id, label, description, color, accent_bg, tag, url, alt_url FROM systems WHERE id = $1", [id]);
+    const rowOut = updated[0];
     return rowOut ? { id: rowOut.id, label: rowOut.label, description: rowOut.description, color: rowOut.color, accentBg: rowOut.accent_bg, tag: rowOut.tag, url: rowOut.url, altUrl: rowOut.alt_url } : null;
   }
 
@@ -439,20 +440,20 @@ export async function updateSystem(id: string, opts: { label?: string; descripti
 }
 
 export async function getUserAccess(userId: string): Promise<SystemAccessRow[]> {
-  if (getDatabaseMode() === "postgres") {
-    const result = await getPgPool().query("SELECT system_id, role FROM user_system_access WHERE user_id = $1", [userId]);
-    return result.rows as SystemAccessRow[];
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT system_id, role FROM user_system_access WHERE user_id = $1", [userId]);
+    return rows as SystemAccessRow[];
   }
   return db.prepare("SELECT system_id, role FROM user_system_access WHERE user_id = ?").all(userId) as SystemAccessRow[];
 }
 
 export async function updateUserSystemAccess(userId: string, access: Array<{ systemId: string; role: Role }>) {
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query("DELETE FROM user_system_access WHERE user_id = $1", [userId]);
-    for (const item of access) {
-      await getPgPool().query("INSERT INTO user_system_access (user_id, system_id, role) VALUES ($1, $2, $3)", [userId, item.systemId, item.role]);
-    }
-    return;
+  if (getDatabaseMode() === "mysql") {
+      await runSql("DELETE FROM user_system_access WHERE user_id = $1", [userId]);
+      for (const item of access) {
+        await runSql("INSERT INTO user_system_access (user_id, system_id, role) VALUES ($1, $2, $3)", [userId, item.systemId, item.role]);
+      }
+      return;
   }
   const deleteStmt = db.prepare("DELETE FROM user_system_access WHERE user_id = ?");
   const insertStmt = db.prepare(`
@@ -478,13 +479,10 @@ export async function createUser(opts: {
   systems?: Array<{ systemId: string; role: Role }>;
 }) {
   const id = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query(
-      "INSERT INTO users (id, email, password_hash, name, avatar, department, is_super_admin, is_approved) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-      [id, opts.email, opts.password_hash, opts.name, opts.avatar, opts.department, opts.is_super_admin ?? 0, opts.is_approved ?? 1],
-    );
+  if (getDatabaseMode() === "mysql") {
+    await runSql("INSERT INTO users (id, email, password_hash, name, avatar, department, is_super_admin, is_approved) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id, opts.email, opts.password_hash, opts.name, opts.avatar, opts.department, opts.is_super_admin ?? 0, opts.is_approved ?? 1]);
     for (const s of opts.systems ?? []) {
-      await pgPool.query("INSERT INTO user_system_access (user_id, system_id, role) VALUES ($1, $2, $3)", [id, s.systemId, s.role]);
+      await runSql("INSERT INTO user_system_access (user_id, system_id, role) VALUES ($1, $2, $3)", [id, s.systemId, s.role]);
     }
     const user = await getUserById(id);
     if (!user) throw new Error("Failed to fetch created user");
@@ -523,16 +521,16 @@ export async function createUser(opts: {
 }
 
 export async function updateUserPassword(userId: string, passwordHash: string) {
-  if (getDatabaseMode() === "postgres") {
-    return getPgPool().query("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, userId]);
+  if (getDatabaseMode() === "mysql") {
+    return runSql("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, userId]);
   }
   return db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, userId);
 }
 
 export async function createAuditLog(opts: { actor?: string; action: string; details?: string }) {
-  if (getDatabaseMode() === "postgres") {
-    const result = await getPgPool().query("INSERT INTO audit_logs (actor, action, details) VALUES ($1, $2, $3)", [opts.actor ?? null, opts.action, opts.details ?? null]);
-    return result.rows[0] ?? result;
+  if (getDatabaseMode() === "mysql") {
+    const res = await runSql("INSERT INTO audit_logs (actor, action, details) VALUES ($1, $2, $3)", [opts.actor ?? null, opts.action, opts.details ?? null]);
+    return res[0] ?? res;
   }
   return db.prepare(`
     INSERT INTO audit_logs (actor, action, details)
@@ -545,16 +543,16 @@ export async function createAuditLog(opts: { actor?: string; action: string; det
 }
 
 export async function getAuditLogs(limit = 20, opts?: { start?: string | null; end?: string | null; action?: string | null }): Promise<AuditLogRow[]> {
-  if (getDatabaseMode() === "postgres") {
+  if (getDatabaseMode() === "mysql") {
     const clauses: string[] = [];
     const values: any[] = [];
     let index = 1;
     if (opts?.start) { clauses.push(`created_at >= $${index++}`); values.push(opts.start); }
     if (opts?.end) { clauses.push(`created_at <= $${index++}`); values.push(opts.end); }
-    if (opts?.action) { clauses.push(`action ILIKE $${index++}`); values.push(`%${opts.action}%`); }
+    if (opts?.action) { clauses.push(`action LIKE $${index++}`); values.push(`%${opts.action}%`); }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const result = await getPgPool().query(`SELECT id, actor, action, details, created_at FROM audit_logs ${where} ORDER BY created_at DESC, id DESC LIMIT $${index}`, [...values, limit]);
-    return result.rows as AuditLogRow[];
+    const rows = await runSql(`SELECT id, actor, action, details, created_at FROM audit_logs ${where} ORDER BY created_at DESC, id DESC LIMIT $${index}`, [...values, limit]);
+    return rows as AuditLogRow[];
   }
   const where: string[] = [];
   const params: any[] = [];
@@ -597,13 +595,10 @@ export interface AnnouncementRow {
 }
 
 export async function createAnnouncement(opts: { id: string; title: string; message: string; priority: string; audienceType: string; audienceJson?: string | null; attachmentUrl?: string | null; attachmentData?: string | null; attachmentName?: string | null; scheduledAt?: string | null; createdBy?: string | null; }) {
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query(
-      "INSERT INTO announcements (id, title, message, priority, audience_type, audience_json, attachment_url, attachment_data, attachment_name, scheduled_at, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-      [opts.id, opts.title, opts.message, opts.priority, opts.audienceType, opts.audienceJson ?? null, opts.attachmentUrl ?? null, opts.attachmentData ?? null, opts.attachmentName ?? null, opts.scheduledAt ?? null, opts.createdBy ?? null],
-    );
-    const result = await getPgPool().query("SELECT * FROM announcements WHERE id = $1", [opts.id]);
-    return result.rows[0] as AnnouncementRow;
+  if (getDatabaseMode() === "mysql") {
+    await runSql("INSERT INTO announcements (id, title, message, priority, audience_type, audience_json, attachment_url, attachment_data, attachment_name, scheduled_at, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)", [opts.id, opts.title, opts.message, opts.priority, opts.audienceType, opts.audienceJson ?? null, opts.attachmentUrl ?? null, opts.attachmentData ?? null, opts.attachmentName ?? null, opts.scheduledAt ?? null, opts.createdBy ?? null]);
+    const rows = await runSql("SELECT * FROM announcements WHERE id = $1", [opts.id]);
+    return rows[0] as AnnouncementRow;
   }
 
   db.prepare(`
@@ -627,9 +622,9 @@ export async function createAnnouncement(opts: { id: string; title: string; mess
 }
 
 export async function getRecentAnnouncements() {
-  if (getDatabaseMode() === "postgres") {
-    const rows = await getPgPool().query("SELECT * FROM announcements WHERE scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP ORDER BY created_at DESC");
-    return rows.rows.map((r: any) => ({
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT * FROM announcements WHERE scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP ORDER BY created_at DESC");
+    return (rows as any[]).map((r: any) => ({
       id: r.id,
       title: r.title,
       message: r.message,
@@ -662,36 +657,36 @@ export async function getRecentAnnouncements() {
 }
 
 export async function recordAnnouncementClick(announcementId: string, userEmail: string | null) {
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query("INSERT INTO announcement_clicks (announcement_id, user_email) VALUES ($1, $2)", [announcementId, userEmail]);
+  if (getDatabaseMode() === "mysql") {
+    await runSql("INSERT INTO announcement_clicks (announcement_id, user_email) VALUES ($1, $2)", [announcementId, userEmail]);
     return;
   }
   db.prepare("INSERT INTO announcement_clicks (announcement_id, user_email) VALUES (?, ?) ").run(announcementId, userEmail);
 }
 
 export async function getAnnouncementClicks(announcementId: string) {
-  if (getDatabaseMode() === "postgres") {
-    const result = await pgPool.query("SELECT announcement_id, user_email, clicked_at FROM announcement_clicks WHERE announcement_id = $1 ORDER BY clicked_at DESC", [announcementId]);
-    return result.rows;
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT announcement_id, user_email, clicked_at FROM announcement_clicks WHERE announcement_id = $1 ORDER BY clicked_at DESC", [announcementId]);
+    return rows;
   }
   return db.prepare("SELECT announcement_id, user_email, clicked_at FROM announcement_clicks WHERE announcement_id = ? ORDER BY clicked_at DESC").all(announcementId);
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  if (getDatabaseMode() === "postgres") {
-    const totalUsers = await getPgPool().query("SELECT COUNT(*)::int AS count FROM users");
-    const totalAdmins = await getPgPool().query("SELECT COUNT(*)::int AS count FROM users WHERE is_super_admin = 1");
-    const totalSystems = await getPgPool().query("SELECT COUNT(*)::int AS count FROM systems");
-    const totalAccessEntries = await getPgPool().query("SELECT COUNT(*)::int AS count FROM user_system_access");
-    const auditLogCount = await getPgPool().query("SELECT COUNT(*)::int AS count FROM audit_logs");
-    const recentActivity = await getPgPool().query("SELECT action, details, created_at FROM audit_logs ORDER BY created_at DESC, id DESC LIMIT 5");
+  if (getDatabaseMode() === "mysql") {
+    const totalUsers = await runSql("SELECT COUNT(*) AS count FROM users");
+    const totalAdmins = await runSql("SELECT COUNT(*) AS count FROM users WHERE is_super_admin = 1");
+    const totalSystems = await runSql("SELECT COUNT(*) AS count FROM systems");
+    const totalAccessEntries = await runSql("SELECT COUNT(*) AS count FROM user_system_access");
+    const auditLogCount = await runSql("SELECT COUNT(*) AS count FROM audit_logs");
+    const recentActivity = await runSql("SELECT action, details, created_at FROM audit_logs ORDER BY created_at DESC, id DESC LIMIT 5");
     return {
-      totalUsers: Number(totalUsers.rows[0].count),
-      totalAdmins: Number(totalAdmins.rows[0].count),
-      totalSystems: Number(totalSystems.rows[0].count),
-      totalAccessEntries: Number(totalAccessEntries.rows[0].count),
-      auditLogCount: Number(auditLogCount.rows[0].count),
-      recentActivity: recentActivity.rows.map((row: any) => ({ action: row.action, details: row.details, created_at: row.created_at })),
+      totalUsers: Number(totalUsers[0].count),
+      totalAdmins: Number(totalAdmins[0].count),
+      totalSystems: Number(totalSystems[0].count),
+      totalAccessEntries: Number(totalAccessEntries[0].count),
+      auditLogCount: Number(auditLogCount[0].count),
+      recentActivity: (recentActivity as any[]).map((row: any) => ({ action: row.action, details: row.details, created_at: row.created_at })),
     };
   }
   const totalUsers = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
@@ -710,8 +705,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
 export async function createPasswordResetToken(email: string, token: string) {
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query("INSERT INTO password_reset_tokens (id, email, expires_at, used) VALUES ($1, $2, $3, 0)", [token, email, expiresAt]);
+  if (getDatabaseMode() === "mysql") {
+    await runSql("INSERT INTO password_reset_tokens (id, email, expires_at, used) VALUES ($1, $2, $3, 0)", [token, email, expiresAt]);
     return { token, expiresAt };
   }
   db.prepare(`
@@ -722,13 +717,13 @@ export async function createPasswordResetToken(email: string, token: string) {
 }
 
 export async function consumePasswordResetToken(email: string, token: string) {
-  if (getDatabaseMode() === "postgres") {
-    const result = await getPgPool().query("SELECT id, email, expires_at, used FROM password_reset_tokens WHERE id = $1 AND lower(email) = lower($2)", [token, email]);
-    const record = result.rows[0];
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT id, email, expires_at, used FROM password_reset_tokens WHERE id = $1 AND lower(email) = lower($2)", [token, email]);
+    const record = rows[0];
     if (!record || Number(record.used) === 1 || new Date(record.expires_at) < new Date()) {
       return null;
     }
-    await getPgPool().query("UPDATE password_reset_tokens SET used = 1 WHERE id = $1", [token]);
+    await runSql("UPDATE password_reset_tokens SET used = 1 WHERE id = $1", [token]);
     return record;
   }
   const record = db.prepare(`
@@ -767,8 +762,8 @@ export async function getPendingRegistrations(): Promise<ReturnType<typeof build
 }
 
 export async function approveUser(userId: string) {
-  if (getDatabaseMode() === "postgres") {
-    await pgPool.query("UPDATE users SET is_approved = 1 WHERE id = $1", [userId]);
+  if (getDatabaseMode() === "mysql") {
+    await runSql("UPDATE users SET is_approved = 1 WHERE id = $1", [userId]);
     const user = await getUserById(userId);
     if (!user) return null;
     return buildUserResponse(user);
@@ -780,19 +775,19 @@ export async function approveUser(userId: string) {
 }
 
 export async function getAllCustomRoles(): Promise<CustomRoleRow[]> {
-  if (getDatabaseMode() === "postgres") {
-    const result = await pgPool.query("SELECT id, name, description FROM custom_roles ORDER BY name");
-    return result.rows as CustomRoleRow[];
+  if (getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT id, name, description FROM custom_roles ORDER BY name");
+    return rows as CustomRoleRow[];
   }
   return db.prepare("SELECT id, name, description FROM custom_roles ORDER BY name").all() as CustomRoleRow[];
 }
 
 export async function createCustomRole(opts: { id: string; name: string; description?: string | null }): Promise<CustomRoleRow> {
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query("INSERT INTO custom_roles (id, name, description) VALUES ($1, $2, $3)", [opts.id, opts.name, opts.description ?? null]);
-    const result = await getPgPool().query("SELECT id, name, description FROM custom_roles WHERE id = $1", [opts.id]);
-    if (!result.rows[0]) throw new Error("Failed to create custom role.");
-    return result.rows[0] as CustomRoleRow;
+  if (getDatabaseMode() === "mysql") {
+    await runSql("INSERT INTO custom_roles (id, name, description) VALUES ($1, $2, $3)", [opts.id, opts.name, opts.description ?? null]);
+    const rows = await runSql("SELECT id, name, description FROM custom_roles WHERE id = $1", [opts.id]);
+    if (!rows[0]) throw new Error("Failed to create custom role.");
+    return rows[0] as CustomRoleRow;
   }
   db.prepare("INSERT INTO custom_roles (id, name, description) VALUES (@id, @name, @description)").run({ id: opts.id, name: opts.name, description: opts.description ?? null });
   const row = db.prepare("SELECT id, name, description FROM custom_roles WHERE id = ?").get(opts.id) as CustomRoleRow | undefined;
@@ -801,14 +796,14 @@ export async function createCustomRole(opts: { id: string; name: string; descrip
 }
 
 export async function updateCustomRole(id: string, opts: { name?: string; description?: string | null }): Promise<CustomRoleRow | null> {
-  if (getDatabaseMode() === "postgres") {
-    const row = await getPgPool().query("SELECT * FROM custom_roles WHERE id = $1", [id]);
-    if (!row.rows[0]) return null;
-    const name = opts.name ?? row.rows[0].name;
-    const description = typeof opts.description === "undefined" ? row.rows[0].description : opts.description;
-    await getPgPool().query("UPDATE custom_roles SET name = $1, description = $2 WHERE id = $3", [name, description, id]);
-    const updated = await getPgPool().query("SELECT id, name, description FROM custom_roles WHERE id = $1", [id]);
-    return updated.rows[0] ?? null;
+  if (getDatabaseMode() === "postgres" || getDatabaseMode() === "mysql") {
+    const rows = await runSql("SELECT * FROM custom_roles WHERE id = $1", [id]);
+    if (!rows[0]) return null;
+    const name = opts.name ?? rows[0].name;
+    const description = typeof opts.description === "undefined" ? rows[0].description : opts.description;
+    await runSql("UPDATE custom_roles SET name = $1, description = $2 WHERE id = $3", [name, description, id]);
+    const updated = await runSql("SELECT id, name, description FROM custom_roles WHERE id = $1", [id]);
+    return updated[0] ?? null;
   }
   const row = db.prepare("SELECT * FROM custom_roles WHERE id = ?").get(id) as CustomRoleRow | undefined;
   if (!row) return null;
@@ -820,8 +815,8 @@ export async function updateCustomRole(id: string, opts: { name?: string; descri
 }
 
 export async function deleteCustomRole(id: string) {
-  if (getDatabaseMode() === "postgres") {
-    await getPgPool().query("DELETE FROM custom_roles WHERE id = $1", [id]);
+  if (getDatabaseMode() === "postgres" || getDatabaseMode() === "mysql") {
+    await runSql("DELETE FROM custom_roles WHERE id = $1", [id]);
     return;
   }
   db.prepare("DELETE FROM custom_roles WHERE id = ?").run(id);

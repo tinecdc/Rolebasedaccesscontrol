@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { pathToFileURL, fileURLToPath } from "url";
+import { getDatabaseMode, runSql, initSchema } from "./db";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const dbPath = path.join(repoRoot, "data", "rba.db");
@@ -18,6 +19,12 @@ export async function runMigrations() {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+
+  // For SQL pool modes, use initSchema which handles CREATE TABLE IF NOT EXISTS
+  if (getDatabaseMode() === "mysql") {
+    await initSchema();
+    return;
+  }
 
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL);`);

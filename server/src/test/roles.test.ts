@@ -11,7 +11,7 @@ import {
 } from "../db.js";
 
 async function main() {
-  assert(["sqlite", "postgres"].includes(getDatabaseMode()), "Unsupported database mode");
+  assert(["sqlite", "mysql"].includes(getDatabaseMode()), "Unsupported database mode");
   await runMigrations();
 
   const id = `rtest_${Date.now().toString(36)}`;
